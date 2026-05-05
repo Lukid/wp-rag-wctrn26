@@ -1,0 +1,1339 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>1. Pipeline Ingestione — WordCamp Torino 2026</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100vw; height: 100vh; overflow: hidden;
+    font-family: 'Inter', sans-serif;
+    background: #F5EDE3;
+  }
+  #topBar {
+    height: 48px; background: #fff; border-bottom: 2px solid #E8DDD0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; position: relative; z-index: 10;
+  }
+  #topBar .title { font-weight: 700; font-size: 16px; color: #1D1D1B; }
+  #topBar .event { font-weight: 400; font-size: 13px; color: #9CA3AF; }
+  #mainCanvas { display: block; }
+  #bottomBar {
+    height: 48px; background: #1D1D1B;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; position: relative; z-index: 10; color: #fff;
+  }
+  #bottomBar .step-num { font-weight: 600; font-size: 13px; }
+  #bottomBar .step-title { font-weight: 600; font-size: 14px; position: absolute; left: 50%; transform: translateX(-50%); }
+  #bottomBar .controls { font-weight: 400; font-size: 12px; color: #9CA3AF; }
+  #toast {
+    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+    background: rgba(29,29,27,0.88); color: #fff; padding: 10px 24px;
+    border-radius: 8px; font-size: 13px; font-weight: 600;
+    z-index: 100; transition: opacity 0.6s; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="topBar">
+  <span class="title">Pipeline di Ingestione RAG</span>
+  <span class="event">WordCamp Torino 2026</span>
+</div>
+<canvas id="mainCanvas"></canvas>
+<div id="bottomBar">
+  <span class="step-num" id="stepNum">Passo 0 di 6</span>
+  <span class="step-title" id="stepTitle">Pipeline di ingestione</span>
+  <span class="controls">SPAZIO = avanti &nbsp;|&nbsp; &larr; = indietro &nbsp;|&nbsp; R = reset</span>
+</div>
+<div id="toast">Premi F11 per lo schermo intero</div>
+
+<script>
+(function() {
+"use strict";
+
+// ---------- COLORS & CONFIG ----------
+const C = {
+  bg:       '#F5EDE3',
+  orange:   '#E8643C',
+  orangeD:  '#D4532B',
+  dark:     '#1D1D1B',
+  blue:     '#2563EB',
+  green:    '#16A34A',
+  purple:   '#7C3AED',
+  gray:     '#6B7280',
+  lightG:   '#9CA3AF',
+  beige:    '#E8DDD0',
+  white:    '#FFFFFF',
+};
+
+const STEP_TITLES = [
+  "Pipeline di ingestione",
+  "Il plugin esporta il contenuto",
+  "Il testo viene diviso in chunk",
+  "Le parole diventano numeri (embedding)",
+  "Due vettori: significato + parole chiave",
+  "Salvato nel database vettoriale",
+  "20 contenuti indicizzati",
+];
+
+const POSTS = [
+  "Le migliori schiacce di Pisa",
+  "Tuttomondo - Keith Haring",
+  "Pisa di notte",
+  "L'Orto Botanico pi\u00f9 antico",
+  "Perch\u00e9 Pisa > Livorno",
+];
+
+const MARKDOWN_LINES = [
+  "# Le migliori schiacce",
+  "A Pisa non chiamatela",
+  "focaccia! Ecco la nostra",
+  "classifica delle schiacce...",
+];
+
+const STAGES = [
+  { icon: "\uD83D\uDCC4", label: "Estrai" },
+  { icon: "\u2702\uFE0F", label: "Chunk" },
+  { icon: "\uD83D\uDD22", label: "Embedding" },
+  { icon: "\uD83D\uDD00", label: "Doppio Vettore" },
+];
+
+// ---------- CANVAS SETUP ----------
+const canvas = document.getElementById('mainCanvas');
+const ctx = canvas.getContext('2d');
+let W, H, dpr;
+let currentStep = 0;
+let animating = false;
+
+// Layout rectangles (recalculated on resize)
+let postCards = [];    // [{x,y,w,h,title,visible,opacity,scale,offsetX,offsetY}]
+let stageBoxes = [];   // [{x,y,w,h,active}]
+let qdrantBox = {};    // {x,y,w,h}
+let arrowPaths = [];   // [{x1,y1,x2,y2}]
+
+// Animation state
+let anim = null;       // current animation object
+let qdrantCount = 0;
+let qdrantDots = [];   // [{x,y,color}]
+let qdrantCheckmark = 0; // alpha for checkmark
+let qdrantPulse = 0;
+let allProcessed = false;
+let finalLabel = 0;    // alpha
+
+// Step-specific states
+let extractText = { lines: [], alpha: [] };
+let chunkState = { x: 0, y: 0, alpha: 0, labelAlpha: 0, borderAlpha: 0 };
+let embedState = { textAlpha: 1, numbersAlpha: 0, sphereAlpha: 0, sphereScale: 0, dimLabel: 0, charProgress: 0 };
+let dualState = { split: 0, orbitAngle: 0, labelsAlpha: 0, phase: 'idle' };
+let storeState = { flyProgress: 0, checkAlpha: 0 };
+let fastFwdState = { trails: [], counterVal: 1, phase: 'idle' };
+let flyingDots = []; // [{x,y,targetX,targetY,color,active,opacity}]
+
+// Particles
+let particles = []; // [{x,y,vx,vy,alpha,life}]
+
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  const topH = 48, botH = 48;
+  W = window.innerWidth;
+  H = window.innerHeight - topH - botH;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  recalcLayout();
+}
+
+function recalcLayout() {
+  const pad = 32;
+  const usableW = W - pad * 2;
+  const usableH = H - pad * 2;
+
+  // Zone widths (percentages) — WP and Qdrant wider for readability
+  const zones = [0.20, 0.15, 0.15, 0.15, 0.15, 0.20];
+  let zoneXs = [];
+  let acc = pad;
+  for (let i = 0; i < zones.length; i++) {
+    zoneXs.push({ x: acc, w: usableW * zones[i] });
+    acc += usableW * zones[i];
+  }
+
+  // Post cards
+  const cardW = Math.min(260, zoneXs[0].w - 16);
+  const cardH = 42;
+  const cardGap = 8;
+  const totalCardsH = POSTS.length * cardH + (POSTS.length - 1) * cardGap;
+  const cardsStartY = (H - totalCardsH) / 2;
+  const cardCX = zoneXs[0].x + zoneXs[0].w / 2;
+  postCards = POSTS.map((title, i) => ({
+    x: cardCX - cardW / 2,
+    y: cardsStartY + i * (cardH + cardGap),
+    w: cardW, h: cardH,
+    title, visible: true, opacity: 1, scale: 1, offsetX: 0, offsetY: 0,
+  }));
+
+  // Stage boxes
+  const stageW = Math.min(148, zoneXs[1].w - 20);
+  const stageH = Math.min(220, usableH * 0.55);
+  const stageCY = H / 2;
+  stageBoxes = [];
+  for (let i = 0; i < 4; i++) {
+    const zx = zoneXs[1 + i];
+    stageBoxes.push({
+      x: zx.x + (zx.w - stageW) / 2,
+      y: stageCY - stageH / 2,
+      w: stageW, h: stageH,
+      active: false,
+    });
+  }
+
+  // Qdrant box
+  const qW = Math.min(160, zoneXs[5].w - 16);
+  const qH = Math.min(240, usableH * 0.6);
+  qdrantBox = {
+    x: zoneXs[5].x + (zoneXs[5].w - qW) / 2,
+    y: stageCY - qH / 2,
+    w: qW, h: qH,
+  };
+
+  // Arrow paths
+  arrowPaths = [];
+  // WP -> Extract
+  arrowPaths.push({
+    x1: postCards[0].x + postCards[0].w + 4,
+    y1: H / 2,
+    x2: stageBoxes[0].x - 4,
+    y2: H / 2,
+  });
+  // Between stages
+  for (let i = 0; i < 3; i++) {
+    arrowPaths.push({
+      x1: stageBoxes[i].x + stageBoxes[i].w + 4,
+      y1: H / 2,
+      x2: stageBoxes[i + 1].x - 4,
+      y2: H / 2,
+    });
+  }
+  // Last stage -> Qdrant
+  arrowPaths.push({
+    x1: stageBoxes[3].x + stageBoxes[3].w + 4,
+    y1: H / 2,
+    x2: qdrantBox.x - 4,
+    y2: H / 2,
+  });
+}
+
+// ---------- EASING ----------
+function easeOutBack(t) {
+  const c = 1.7;
+  return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2);
+}
+function easeInOut(t) {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+function easeIn(t) { return t * t; }
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// ---------- DRAWING HELPERS ----------
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+function drawArrow(x1, y1, x2, y2, color, dashed, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha || 1;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  if (dashed) ctx.setLineDash([6, 4]);
+  else ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  // Arrowhead
+  const sz = 7;
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - sz * Math.cos(angle - 0.4), y2 - sz * Math.sin(angle - 0.4));
+  ctx.lineTo(x2 - sz * Math.cos(angle + 0.4), y2 - sz * Math.sin(angle + 0.4));
+  ctx.closePath();
+  ctx.fill();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawPostCard(card) {
+  if (!card.visible && card.opacity <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = card.opacity;
+  const cx = card.x + card.offsetX;
+  const cy = card.y + card.offsetY;
+  const s = card.scale;
+  ctx.translate(cx + card.w / 2, cy + card.h / 2);
+  ctx.scale(s, s);
+  ctx.translate(-(card.w / 2), -(card.h / 2));
+  // Shadow
+  if (s > 1.01) {
+    ctx.shadowColor = 'rgba(0,0,0,0.15)';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 4;
+  }
+  // Card body
+  roundRect(0, 0, card.w, card.h, 8);
+  ctx.fillStyle = C.white;
+  ctx.fill();
+  ctx.strokeStyle = C.beige;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  // Orange left border
+  ctx.fillStyle = C.orange;
+  roundRect(0, 0, 5, card.h, 8);
+  ctx.fill();
+  ctx.fillStyle = C.orange;
+  ctx.fillRect(3, 4, 2, card.h - 8);
+  // Title
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = C.dark;
+  ctx.font = '600 13px Inter';
+  ctx.textBaseline = 'middle';
+  const maxTextW = card.w - 24;
+  let title = card.title;
+  if (ctx.measureText(title).width > maxTextW) {
+    while (ctx.measureText(title + '...').width > maxTextW && title.length > 5) title = title.slice(0, -1);
+    title += '...';
+  }
+  ctx.fillText(title, 14, card.h / 2 - 5);
+  // Badge
+  ctx.font = '400 9px Inter';
+  ctx.fillStyle = C.green;
+  ctx.fillText('Pubblicato', 14, card.h / 2 + 9);
+  ctx.restore();
+}
+
+function drawStageBox(box, index) {
+  ctx.save();
+  roundRect(box.x, box.y, box.w, box.h, 12);
+  if (box.active) {
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fill();
+    ctx.strokeStyle = C.orange;
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([]);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fill();
+    ctx.strokeStyle = C.beige;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // Icon + label
+  const st = STAGES[index];
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.font = '30px Inter';
+  ctx.fillText(st.icon, box.x + box.w / 2, box.y + 14);
+  ctx.font = '600 14px Inter';
+  ctx.fillStyle = box.active ? C.dark : C.gray;
+  ctx.fillText(st.label, box.x + box.w / 2, box.y + 50);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+function drawQdrant() {
+  ctx.save();
+  const b = qdrantBox;
+  roundRect(b.x, b.y, b.w, b.h, 12);
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.fill();
+
+  // Border: blue normally, pulse green when qdrantPulse > 0
+  if (qdrantPulse > 0) {
+    ctx.strokeStyle = C.green;
+    ctx.lineWidth = 2.5 + qdrantPulse * 2;
+    ctx.globalAlpha = 0.5 + qdrantPulse * 0.5;
+  } else {
+    ctx.strokeStyle = C.blue;
+    ctx.lineWidth = 2;
+  }
+  ctx.setLineDash([]);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  // Database icon (simplified cylinder)
+  const iconCX = b.x + b.w / 2;
+  const iconCY = b.y + 28;
+  ctx.fillStyle = C.blue;
+  ctx.beginPath();
+  ctx.ellipse(iconCX, iconCY - 6, 18, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(37,99,235,0.7)';
+  ctx.fillRect(iconCX - 18, iconCY - 6, 36, 18);
+  ctx.fillStyle = C.blue;
+  ctx.beginPath();
+  ctx.ellipse(iconCX, iconCY + 12, 18, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Label
+  ctx.textAlign = 'center';
+  ctx.font = '700 15px Inter';
+  ctx.fillStyle = C.blue;
+  ctx.fillText('Qdrant', b.x + b.w / 2, b.y + 56);
+
+  // Counter badge
+  ctx.font = '700 14px Inter';
+  const counterText = qdrantCount + '/20';
+  const tw = ctx.measureText(counterText).width;
+  const badgeW = tw + 16;
+  const badgeH = 24;
+  const badgeX = b.x + (b.w - badgeW) / 2;
+  const badgeY = b.y + 70;
+  roundRect(badgeX, badgeY, badgeW, badgeH, 6);
+  ctx.fillStyle = qdrantCount >= 20 ? C.green : C.beige;
+  ctx.fill();
+  ctx.fillStyle = qdrantCount >= 20 ? C.white : C.dark;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(counterText, b.x + b.w / 2, badgeY + badgeH / 2);
+  ctx.textBaseline = 'top';
+
+  // Dots area
+  const dotsAreaY = badgeY + badgeH + 12;
+  const dotsAreaH = b.y + b.h - dotsAreaY - 30;
+  for (let d of qdrantDots) {
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = d.color;
+    ctx.globalAlpha = 0.7;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // Checkmark
+  if (qdrantCheckmark > 0) {
+    ctx.globalAlpha = qdrantCheckmark;
+    ctx.font = '28px Inter';
+    ctx.fillText('\u2705', b.x + b.w / 2, b.y + b.h - 32);
+    ctx.globalAlpha = 1;
+  }
+
+  // Final label
+  if (finalLabel > 0) {
+    ctx.globalAlpha = finalLabel;
+    ctx.font = '700 15px Inter';
+    ctx.fillStyle = C.green;
+    ctx.fillText('20 contenuti indicizzati', b.x + b.w / 2, b.y + b.h + 8);
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+function drawParticles() {
+  for (let p of particles) {
+    ctx.save();
+    ctx.globalAlpha = p.alpha * Math.min(1, p.life * 4);
+    ctx.fillStyle = p.color || C.orange;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size || 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function spawnParticles(x1, y1, x2, y2, count, color) {
+  for (let i = 0; i < count; i++) {
+    const delay = i * 0.12;
+    particles.push({
+      x: x1, y: y1,
+      targetX: x2, targetY: y2,
+      progress: -delay,
+      speed: 0.6 + Math.random() * 0.3,
+      alpha: 0.6 + Math.random() * 0.3,
+      color: color || C.orange,
+      size: 2.5 + Math.random() * 1.5,
+      life: 1,
+      done: false,
+    });
+  }
+}
+
+function updateParticles(dt) {
+  for (let p of particles) {
+    p.progress += dt * p.speed;
+    if (p.progress < 0) continue;
+    const t = Math.min(1, p.progress);
+    p.x = lerp(p.x, p.targetX, 0.05 + t * 0.08);
+    p.y = lerp(p.y, p.targetY, 0.05 + t * 0.08);
+    if (t >= 1) {
+      p.life -= dt * 2;
+      if (p.life <= 0) p.done = true;
+    }
+  }
+  particles = particles.filter(p => !p.done);
+}
+
+// ---------- MAIN DRAW ----------
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Arrows
+  for (let i = 0; i < arrowPaths.length; i++) {
+    const a = arrowPaths[i];
+    const isActive = isArrowActive(i);
+    drawArrow(a.x1, a.y1, a.x2, a.y2,
+      isActive ? C.orange : C.lightG,
+      !isActive, isActive ? 1 : 0.5);
+  }
+
+  // Post cards
+  for (let i = postCards.length - 1; i >= 0; i--) {
+    drawPostCard(postCards[i]);
+  }
+
+  // Stage boxes
+  for (let i = 0; i < stageBoxes.length; i++) {
+    drawStageBox(stageBoxes[i], i);
+    // Step-specific content drawn inside
+    drawStageContent(i);
+  }
+
+  // Qdrant
+  drawQdrant();
+
+  // Flying dots (step 5)
+  drawFlyingDots();
+
+  // Particles
+  drawParticles();
+}
+
+function isArrowActive(i) {
+  if (currentStep === 1 && i === 0) return true;
+  if (currentStep === 2 && i === 1) return true;
+  if (currentStep === 3 && i === 2) return true;
+  if (currentStep === 4 && i === 3) return true;
+  if (currentStep === 5 && i === 4) return true;
+  if (currentStep === 6) return true;
+  return false;
+}
+
+function drawStageContent(stageIndex) {
+  const box = stageBoxes[stageIndex];
+  const contentY = box.y + 70;
+  const contentH = box.h - 80;
+  const contentW = box.w - 20;
+  const contentX = box.x + 10;
+
+  // Step 1: extract text
+  if (stageIndex === 0 && currentStep >= 1 && currentStep < 6) {
+    ctx.save();
+    for (let i = 0; i < extractText.lines.length; i++) {
+      const a = extractText.alpha[i] || 0;
+      if (a <= 0) continue;
+      ctx.globalAlpha = a;
+      ctx.font = i === 0 ? '700 11px Inter' : '400 11px Inter';
+      ctx.fillStyle = C.dark;
+      ctx.textBaseline = 'top';
+      ctx.fillText(extractText.lines[i], contentX + 4, contentY + i * 16, contentW - 8);
+    }
+    ctx.restore();
+  }
+
+  // Step 2: chunk
+  if (stageIndex === 1 && currentStep >= 2 && currentStep < 6) {
+    ctx.save();
+    ctx.globalAlpha = chunkState.alpha;
+    // Chunk border
+    if (chunkState.borderAlpha > 0) {
+      roundRect(contentX, contentY, contentW, 72, 6);
+      ctx.strokeStyle = C.blue;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = chunkState.borderAlpha;
+      ctx.stroke();
+      ctx.globalAlpha = chunkState.alpha;
+    }
+    // Text inside chunk
+    for (let i = 0; i < MARKDOWN_LINES.length; i++) {
+      ctx.font = i === 0 ? '700 11px Inter' : '400 11px Inter';
+      ctx.fillStyle = C.dark;
+      ctx.textBaseline = 'top';
+      ctx.fillText(MARKDOWN_LINES[i], contentX + 6, contentY + 6 + i * 14, contentW - 12);
+    }
+    // Label
+    if (chunkState.labelAlpha > 0) {
+      ctx.globalAlpha = chunkState.labelAlpha;
+      ctx.font = '400 11px Inter';
+      ctx.fillStyle = C.gray;
+      ctx.textAlign = 'center';
+      ctx.fillText('~500 parole \u2192 1 chunk', box.x + box.w / 2, contentY + 82);
+      ctx.textAlign = 'left';
+    }
+    ctx.restore();
+  }
+
+  // Step 3: embedding
+  if (stageIndex === 2 && currentStep >= 3 && currentStep < 6) {
+    ctx.save();
+    const centerX = box.x + box.w / 2;
+    const centerY = box.y + box.h / 2 + 5;
+    // Dissolving text
+    if (embedState.textAlpha > 0) {
+      const allChars = MARKDOWN_LINES.join('\n');
+      const totalChars = allChars.length;
+      const charsGone = Math.floor(embedState.charProgress * totalChars);
+      let charIdx = 0;
+      for (let li = 0; li < MARKDOWN_LINES.length; li++) {
+        for (let ci = 0; ci < MARKDOWN_LINES[li].length; ci++) {
+          const a = charIdx < charsGone ? Math.max(0, 1 - (charsGone - charIdx) * 0.15) : embedState.textAlpha;
+          if (a > 0.01) {
+            ctx.globalAlpha = a;
+            ctx.font = li === 0 ? '700 10px Inter' : '400 10px Inter';
+            ctx.fillStyle = C.dark;
+            ctx.textBaseline = 'top';
+            ctx.fillText(MARKDOWN_LINES[li][ci], contentX + 4 + ci * 6.5, contentY + li * 14);
+          }
+          charIdx++;
+        }
+        charIdx++; // newline
+      }
+    }
+    // Numbers appearing
+    if (embedState.numbersAlpha > 0) {
+      const nums = ['0.23', '-0.87', '0.41', '0.12', '-0.55', '0.78', '-0.33', '0.91', '-0.16', '0.67', '-0.44', '0.29'];
+      ctx.font = '600 10px Inter';
+      ctx.fillStyle = C.orange;
+      for (let i = 0; i < nums.length; i++) {
+        const angle = (i / nums.length) * Math.PI * 2;
+        const radius = 42 * (1 - embedState.sphereScale * 0.6);
+        const nx = centerX + Math.cos(angle) * radius;
+        const ny = centerY + Math.sin(angle) * radius * 0.7;
+        ctx.globalAlpha = embedState.numbersAlpha * (1 - embedState.sphereScale * 0.5);
+        ctx.textAlign = 'center';
+        ctx.fillText(nums[i], nx, ny);
+      }
+      ctx.textAlign = 'left';
+    }
+    // Glowing sphere
+    if (embedState.sphereAlpha > 0) {
+      ctx.globalAlpha = embedState.sphereAlpha;
+      const r = 10 + Math.sin(Date.now() * 0.005) * 2;
+      // Glow
+      const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, r * 2.5);
+      grad.addColorStop(0, 'rgba(232,100,60,0.5)');
+      grad.addColorStop(1, 'rgba(232,100,60,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, r * 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      // Core
+      ctx.fillStyle = C.orange;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Dimension label
+    if (embedState.dimLabel > 0) {
+      ctx.globalAlpha = embedState.dimLabel;
+      ctx.font = '400 11px Inter';
+      ctx.fillStyle = C.gray;
+      ctx.textAlign = 'center';
+      ctx.fillText('3.072 dimensioni', box.x + box.w / 2, box.y + box.h - 20);
+      ctx.textAlign = 'left';
+    }
+    ctx.restore();
+  }
+
+  // Step 4: dual vector
+  if (stageIndex === 3 && currentStep >= 4 && currentStep < 6) {
+    ctx.save();
+    const centerX = box.x + box.w / 2;
+    const centerY = box.y + box.h / 2;
+
+    if (dualState.phase !== 'idle') {
+      const sep = dualState.split * 28;
+      const orbitR = 20;
+      let ox1, oy1, ox2, oy2;
+
+      if (dualState.orbitAngle > 0 && dualState.orbitAngle < Math.PI * 2) {
+        // Orbiting phase
+        ox1 = centerX + Math.cos(dualState.orbitAngle) * orbitR;
+        oy1 = centerY + Math.sin(dualState.orbitAngle) * orbitR;
+        ox2 = centerX + Math.cos(dualState.orbitAngle + Math.PI) * orbitR;
+        oy2 = centerY + Math.sin(dualState.orbitAngle + Math.PI) * orbitR;
+      } else {
+        // Side by side
+        ox1 = centerX - sep;
+        oy1 = centerY;
+        ox2 = centerX + sep;
+        oy2 = centerY;
+      }
+
+      // Dense point (orange)
+      ctx.globalAlpha = 1;
+      const gr1 = ctx.createRadialGradient(ox1, oy1, 0, ox1, oy1, 16);
+      gr1.addColorStop(0, 'rgba(232,100,60,0.4)');
+      gr1.addColorStop(1, 'rgba(232,100,60,0)');
+      ctx.fillStyle = gr1;
+      ctx.beginPath();
+      ctx.arc(ox1, oy1, 16, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = C.orange;
+      ctx.beginPath();
+      ctx.arc(ox1, oy1, 7, 0, Math.PI * 2);
+      ctx.fill();
+
+      // BM25 point (blue)
+      const gr2 = ctx.createRadialGradient(ox2, oy2, 0, ox2, oy2, 16);
+      gr2.addColorStop(0, 'rgba(37,99,235,0.4)');
+      gr2.addColorStop(1, 'rgba(37,99,235,0)');
+      ctx.fillStyle = gr2;
+      ctx.beginPath();
+      ctx.arc(ox2, oy2, 16, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = C.blue;
+      ctx.beginPath();
+      ctx.arc(ox2, oy2, 7, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Labels
+      if (dualState.labelsAlpha > 0) {
+        ctx.globalAlpha = dualState.labelsAlpha;
+        ctx.textAlign = 'center';
+        ctx.font = '700 11px Inter';
+        ctx.fillStyle = C.orange;
+        ctx.fillText('Dense', centerX - sep, centerY + 22);
+        ctx.fillStyle = C.blue;
+        ctx.fillText('BM25', centerX + sep, centerY + 22);
+        ctx.font = '400 10px Inter';
+        ctx.fillStyle = C.gray;
+        ctx.fillText('significato', centerX - sep, centerY + 36);
+        ctx.fillText('parole chiave', centerX + sep, centerY + 36);
+        ctx.textAlign = 'left';
+      }
+    }
+    ctx.restore();
+  }
+
+  // Fast-forward trails (step 6)
+  if (currentStep === 6) {
+    for (let trail of fastFwdState.trails) {
+      if (!trail.active) continue;
+      ctx.save();
+      // Comet tail
+      const tailLen = 8;
+      for (let t = 0; t < tailLen; t++) {
+        const tt = t / tailLen;
+        ctx.globalAlpha = (1 - tt) * 0.4 * trail.opacity;
+        ctx.fillStyle = trail.color;
+        ctx.beginPath();
+        ctx.arc(trail.x - t * 8, trail.y, 4 - tt * 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Head
+      ctx.globalAlpha = trail.opacity;
+      ctx.fillStyle = trail.color;
+      ctx.beginPath();
+      ctx.arc(trail.x, trail.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+}
+
+// ---------- ANIMATION SYSTEM ----------
+let lastTime = 0;
+let animStartTime = 0;
+let animDuration = 0;
+let animCallback = null;
+let animUpdate = null;
+
+function startAnim(duration, updateFn, doneFn) {
+  animating = true;
+  animStartTime = performance.now();
+  animDuration = duration * 1000;
+  animUpdate = updateFn;
+  animCallback = doneFn;
+}
+
+function loop(time) {
+  const dt = Math.min(0.05, (time - (lastTime || time)) / 1000);
+  lastTime = time;
+
+  if (animating && animUpdate) {
+    const elapsed = time - animStartTime;
+    const progress = Math.min(1, elapsed / animDuration);
+    animUpdate(progress, dt);
+    if (progress >= 1) {
+      animating = false;
+      if (animCallback) animCallback();
+      animUpdate = null;
+      animCallback = null;
+    }
+  }
+
+  updateParticles(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ---------- STEP LOGIC ----------
+function resetAll() {
+  currentStep = 0;
+  animating = false;
+  animUpdate = null;
+  animCallback = null;
+  particles = [];
+  qdrantCount = 0;
+  qdrantDots = [];
+  qdrantCheckmark = 0;
+  qdrantPulse = 0;
+  allProcessed = false;
+  finalLabel = 0;
+  extractText = { lines: [], alpha: [] };
+  chunkState = { x: 0, y: 0, alpha: 0, labelAlpha: 0, borderAlpha: 0 };
+  embedState = { textAlpha: 1, numbersAlpha: 0, sphereAlpha: 0, sphereScale: 0, dimLabel: 0, charProgress: 0 };
+  dualState = { split: 0, orbitAngle: 0, labelsAlpha: 0, phase: 'idle' };
+  storeState = { flyProgress: 0, checkAlpha: 0 };
+  fastFwdState = { trails: [], counterVal: 1, phase: 'idle' };
+  flyingDots = [];
+  recalcLayout();
+  for (let s of stageBoxes) s.active = false;
+  updateUI();
+}
+
+function goToStep(step) {
+  if (step < 0 || step > 6) return;
+  if (animating) return;
+  currentStep = step;
+  executeStep(step);
+  updateUI();
+}
+
+function advanceStep() {
+  if (animating) return;
+  if (currentStep >= 6) return;
+  currentStep++;
+  executeStep(currentStep);
+  updateUI();
+}
+
+function goBack() {
+  if (animating) return;
+  if (currentStep <= 0) return;
+  // Reset and replay up to (currentStep - 1)
+  const target = currentStep - 1;
+  resetAll();
+  if (target === 0) return;
+  // Replay steps instantly
+  replayToStep(target);
+}
+
+function replayToStep(target) {
+  // Set states as if we completed up to target
+  // This is the "instant" version for going back
+  resetAll();
+  for (let s = 1; s <= target; s++) {
+    applyStepInstant(s);
+  }
+  currentStep = target;
+  updateUI();
+}
+
+function applyStepInstant(step) {
+  switch(step) {
+    case 1:
+      postCards[0].visible = false;
+      postCards[0].opacity = 0;
+      stageBoxes[0].active = true;
+      extractText.lines = MARKDOWN_LINES.slice();
+      extractText.alpha = [1, 1, 1, 1];
+      break;
+    case 2:
+      stageBoxes[0].active = false;
+      stageBoxes[1].active = true;
+      extractText.alpha = [0, 0, 0, 0];
+      chunkState.alpha = 1;
+      chunkState.borderAlpha = 1;
+      chunkState.labelAlpha = 1;
+      break;
+    case 3:
+      stageBoxes[1].active = false;
+      stageBoxes[2].active = true;
+      chunkState.alpha = 0;
+      embedState.textAlpha = 0;
+      embedState.charProgress = 1;
+      embedState.numbersAlpha = 0.3;
+      embedState.sphereAlpha = 1;
+      embedState.sphereScale = 1;
+      embedState.dimLabel = 1;
+      break;
+    case 4:
+      stageBoxes[2].active = false;
+      stageBoxes[3].active = true;
+      embedState.sphereAlpha = 0;
+      dualState.phase = 'done';
+      dualState.split = 1;
+      dualState.orbitAngle = Math.PI * 2;
+      dualState.labelsAlpha = 1;
+      break;
+    case 5:
+      stageBoxes[3].active = false;
+      dualState.phase = 'idle';
+      qdrantCount = 1;
+      addQdrantDot(C.orange);
+      addQdrantDot(C.blue);
+      break;
+    case 6:
+      for (let i = 1; i < 5; i++) {
+        postCards[i].visible = false;
+        postCards[i].opacity = 0;
+      }
+      qdrantCount = 20;
+      for (let i = 0; i < 38; i++) {
+        addQdrantDot(i % 2 === 0 ? C.orange : C.blue);
+      }
+      qdrantCheckmark = 1;
+      allProcessed = true;
+      finalLabel = 1;
+      break;
+  }
+}
+
+function addQdrantDot(color) {
+  const b = qdrantBox;
+  const dotsAreaY = b.y + 110;
+  const dotsAreaH = b.h - 145;
+  const dotsAreaW = b.w - 20;
+  qdrantDots.push({
+    x: b.x + 10 + Math.random() * dotsAreaW,
+    y: dotsAreaY + Math.random() * dotsAreaH,
+    color: color,
+  });
+}
+
+function executeStep(step) {
+  switch(step) {
+    case 0: break;
+    case 1: runStep1(); break;
+    case 2: runStep2(); break;
+    case 3: runStep3(); break;
+    case 4: runStep4(); break;
+    case 5: runStep5(); break;
+    case 6: runStep6(); break;
+  }
+}
+
+// Step 1: Extract
+function runStep1() {
+  const card = postCards[0];
+  const targetX = stageBoxes[0].x + stageBoxes[0].w / 2 - card.w / 2 - card.x;
+  const targetY = stageBoxes[0].y + 20 - card.y;
+
+  extractText.lines = MARKDOWN_LINES.slice();
+  extractText.alpha = [0, 0, 0, 0];
+
+  const arrow = arrowPaths[0];
+  spawnParticles(arrow.x1, arrow.y1, arrow.x2, arrow.y2, 6, C.orange);
+
+  startAnim(2, (p) => {
+    if (p < 0.5) {
+      // Card lifts and moves
+      const t = easeOutBack(p * 2);
+      card.scale = 1 + 0.05 * Math.min(1, p * 4);
+      card.offsetX = targetX * t;
+      card.offsetY = targetY * t;
+      card.opacity = 1;
+    } else {
+      // Card fades, text appears
+      const t2 = (p - 0.5) * 2;
+      card.opacity = 1 - t2;
+      stageBoxes[0].active = true;
+      for (let i = 0; i < 4; i++) {
+        const lineT = Math.max(0, Math.min(1, (t2 - i * 0.15) * 3));
+        extractText.alpha[i] = lineT;
+      }
+    }
+  }, () => {
+    card.visible = false;
+    card.opacity = 0;
+    stageBoxes[0].active = true;
+    extractText.alpha = [1, 1, 1, 1];
+  });
+}
+
+// Step 2: Chunk
+function runStep2() {
+  chunkState.alpha = 0;
+  chunkState.borderAlpha = 0;
+  chunkState.labelAlpha = 0;
+
+  const arrow = arrowPaths[1];
+  spawnParticles(arrow.x1, arrow.y1, arrow.x2, arrow.y2, 6, C.orange);
+
+  startAnim(1.5, (p) => {
+    if (p < 0.4) {
+      // Fade out extract text, fade in chunk
+      const t = p / 0.4;
+      for (let i = 0; i < 4; i++) extractText.alpha[i] = 1 - t;
+      stageBoxes[0].active = true;
+    } else if (p < 0.7) {
+      const t = (p - 0.4) / 0.3;
+      stageBoxes[0].active = false;
+      stageBoxes[1].active = true;
+      chunkState.alpha = t;
+      for (let i = 0; i < 4; i++) extractText.alpha[i] = 0;
+    } else {
+      const t = (p - 0.7) / 0.3;
+      chunkState.alpha = 1;
+      chunkState.borderAlpha = easeInOut(t);
+      chunkState.labelAlpha = easeInOut(Math.max(0, (t - 0.3) / 0.7));
+    }
+  }, () => {
+    stageBoxes[0].active = false;
+    stageBoxes[1].active = true;
+    extractText.alpha = [0, 0, 0, 0];
+    chunkState.alpha = 1;
+    chunkState.borderAlpha = 1;
+    chunkState.labelAlpha = 1;
+  });
+}
+
+// Step 3: Embedding (WOW moment)
+function runStep3() {
+  embedState = { textAlpha: 1, numbersAlpha: 0, sphereAlpha: 0, sphereScale: 0, dimLabel: 0, charProgress: 0 };
+
+  const arrow = arrowPaths[2];
+  spawnParticles(arrow.x1, arrow.y1, arrow.x2, arrow.y2, 8, C.orange);
+
+  startAnim(3, (p) => {
+    if (p < 0.15) {
+      // Chunk fades to embed stage
+      const t = p / 0.15;
+      chunkState.alpha = 1 - t;
+      stageBoxes[1].active = true;
+    } else if (p < 0.2) {
+      chunkState.alpha = 0;
+      stageBoxes[1].active = false;
+      stageBoxes[2].active = true;
+      embedState.textAlpha = 1;
+    } else if (p < 0.55) {
+      // Text dissolves character by character
+      const t = (p - 0.2) / 0.35;
+      embedState.charProgress = t;
+      embedState.textAlpha = 1 - t * 0.7;
+      embedState.numbersAlpha = t * 0.8;
+    } else if (p < 0.75) {
+      // Numbers coalesce into sphere
+      const t = (p - 0.55) / 0.2;
+      embedState.textAlpha = 0;
+      embedState.charProgress = 1;
+      embedState.numbersAlpha = 0.8 * (1 - t);
+      embedState.sphereAlpha = easeInOut(t);
+      embedState.sphereScale = easeInOut(t);
+    } else {
+      // Sphere pulses, dimension label
+      const t = (p - 0.75) / 0.25;
+      embedState.textAlpha = 0;
+      embedState.numbersAlpha = 0.3 * (1 - t);
+      embedState.sphereAlpha = 1;
+      embedState.sphereScale = 1;
+      embedState.dimLabel = easeInOut(t);
+    }
+  }, () => {
+    stageBoxes[1].active = false;
+    stageBoxes[2].active = true;
+    chunkState.alpha = 0;
+    embedState.textAlpha = 0;
+    embedState.charProgress = 1;
+    embedState.numbersAlpha = 0.3;
+    embedState.sphereAlpha = 1;
+    embedState.sphereScale = 1;
+    embedState.dimLabel = 1;
+  });
+}
+
+// Step 4: Dual Vector
+function runStep4() {
+  dualState = { split: 0, orbitAngle: 0, labelsAlpha: 0, phase: 'splitting' };
+
+  const arrow = arrowPaths[3];
+  spawnParticles(arrow.x1, arrow.y1, arrow.x2, arrow.y2, 6, C.orange);
+
+  startAnim(2, (p) => {
+    if (p < 0.15) {
+      // Transition from embed to dual
+      const t = p / 0.15;
+      embedState.sphereAlpha = 1 - t;
+      embedState.dimLabel = 1 - t;
+      stageBoxes[2].active = true;
+    } else if (p < 0.2) {
+      stageBoxes[2].active = false;
+      stageBoxes[3].active = true;
+      embedState.sphereAlpha = 0;
+      dualState.phase = 'splitting';
+    } else if (p < 0.45) {
+      // Split
+      const t = (p - 0.2) / 0.25;
+      dualState.split = easeOutBack(t);
+    } else if (p < 0.8) {
+      // Orbit
+      const t = (p - 0.45) / 0.35;
+      dualState.split = 1;
+      dualState.orbitAngle = t * Math.PI * 2;
+    } else {
+      // Labels appear
+      const t = (p - 0.8) / 0.2;
+      dualState.orbitAngle = Math.PI * 2;
+      dualState.labelsAlpha = easeInOut(t);
+    }
+  }, () => {
+    stageBoxes[2].active = false;
+    stageBoxes[3].active = true;
+    dualState.phase = 'done';
+    dualState.split = 1;
+    dualState.orbitAngle = Math.PI * 2;
+    dualState.labelsAlpha = 1;
+  });
+}
+
+// Step 5: Store — flying dots rendering
+function drawFlyingDots() {
+  for (let fd of flyingDots) {
+    if (!fd.active) continue;
+    ctx.save();
+    ctx.globalAlpha = fd.opacity;
+    const gr = ctx.createRadialGradient(fd.x, fd.y, 0, fd.x, fd.y, 14);
+    gr.addColorStop(0, fd.color === C.orange ? 'rgba(232,100,60,0.4)' : 'rgba(37,99,235,0.4)');
+    gr.addColorStop(1, fd.color === C.orange ? 'rgba(232,100,60,0)' : 'rgba(37,99,235,0)');
+    ctx.fillStyle = gr;
+    ctx.beginPath();
+    ctx.arc(fd.x, fd.y, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = fd.color;
+    ctx.beginPath();
+    ctx.arc(fd.x, fd.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function runStep5() {
+  const arrow = arrowPaths[4];
+  const sBox = stageBoxes[3];
+  const startX = sBox.x + sBox.w / 2;
+  const startY = sBox.y + sBox.h / 2;
+  const endX = qdrantBox.x + qdrantBox.w / 2;
+  const endY = qdrantBox.y + qdrantBox.h / 2;
+
+  // Prepare flying dots from dual vector positions
+  flyingDots = [
+    { x: startX - 28, y: startY, targetX: endX - 8, targetY: endY, color: C.orange, active: true, opacity: 1 },
+    { x: startX + 28, y: startY, targetX: endX + 8, targetY: endY, color: C.blue, active: true, opacity: 1 },
+  ];
+
+  spawnParticles(arrow.x1, arrow.y1, arrow.x2, arrow.y2, 6, C.blue);
+
+  startAnim(1.5, (p) => {
+    if (p < 0.05) {
+      stageBoxes[3].active = true;
+    } else if (p < 0.15) {
+      // Hide dual state, show flying dots
+      dualState.phase = 'idle';
+      stageBoxes[3].active = false;
+    } else if (p < 0.55) {
+      // Fly to Qdrant
+      const t = easeIn((p - 0.15) / 0.4);
+      for (let fd of flyingDots) {
+        fd.x = lerp(fd.x < endX ? startX - 28 : startX + 28, fd.targetX, t);
+        fd.y = lerp(startY, fd.targetY, t);
+        fd.opacity = 1;
+      }
+    } else if (p < 0.7) {
+      // Land in Qdrant
+      const t = (p - 0.55) / 0.15;
+      for (let fd of flyingDots) {
+        fd.x = fd.targetX;
+        fd.y = fd.targetY;
+        fd.opacity = 1 - t;
+      }
+      if (qdrantCount === 0) {
+        qdrantCount = 1;
+        addQdrantDot(C.orange);
+        addQdrantDot(C.blue);
+      }
+      storeState.checkAlpha = easeInOut(t);
+      qdrantCheckmark = storeState.checkAlpha;
+    } else {
+      // Checkmark fades out
+      const t = (p - 0.7) / 0.3;
+      for (let fd of flyingDots) fd.active = false;
+      qdrantCheckmark = Math.max(0, 1 - t * 1.5);
+    }
+  }, () => {
+    dualState.phase = 'idle';
+    stageBoxes[3].active = false;
+    flyingDots = [];
+    qdrantCount = 1;
+    qdrantCheckmark = 0;
+    if (qdrantDots.length < 2) {
+      addQdrantDot(C.orange);
+      addQdrantDot(C.blue);
+    }
+  });
+}
+
+// Step 6: Fast forward
+function runStep6() {
+  const totalTrails = 4;
+  const startX = postCards[1].x + postCards[1].w;
+  const endX = qdrantBox.x + qdrantBox.w / 2;
+  const midY = H / 2;
+  const trailColors = [C.orange, C.orangeD, C.orange, C.orangeD];
+
+  fastFwdState.trails = [];
+  for (let i = 0; i < totalTrails; i++) {
+    fastFwdState.trails.push({
+      x: startX,
+      y: midY + (i - 1.5) * 6,
+      active: false,
+      progress: 0,
+      delay: i * 0.12,
+      color: trailColors[i],
+      opacity: 1,
+      cardIndex: i + 1,
+    });
+  }
+
+  // Counter increments: 1 -> 5 fast, then jump to 20
+  let lastCounterUpdate = 0;
+
+  startAnim(3, (p) => {
+    // Activate trails sequentially
+    for (let i = 0; i < totalTrails; i++) {
+      const trail = fastFwdState.trails[i];
+      const trailP = Math.max(0, (p - trail.delay) / (0.5));
+      if (trailP > 0 && !trail.active) {
+        trail.active = true;
+        postCards[trail.cardIndex].opacity = 0;
+        postCards[trail.cardIndex].visible = false;
+      }
+      if (trail.active) {
+        const t = Math.min(1, trailP);
+        trail.x = lerp(startX, endX, easeInOut(t));
+        trail.opacity = t < 0.8 ? 1 : 1 - (t - 0.8) / 0.2;
+        if (t >= 1) {
+          trail.active = false;
+        }
+      }
+    }
+
+    // Counter logic
+    if (p < 0.6) {
+      const ct = Math.floor(1 + p / 0.6 * 4);
+      qdrantCount = Math.min(ct, 5);
+    } else if (p < 0.75) {
+      qdrantCount = Math.min(20, Math.floor(5 + (p - 0.6) / 0.15 * 15));
+    } else {
+      qdrantCount = 20;
+    }
+
+    // Add dots progressively
+    while (qdrantDots.length < qdrantCount * 2) {
+      addQdrantDot(qdrantDots.length % 2 === 0 ? C.orange : C.blue);
+    }
+
+    // Final state
+    if (p > 0.85) {
+      const t = (p - 0.85) / 0.15;
+      qdrantCheckmark = easeInOut(t);
+      finalLabel = easeInOut(t);
+      qdrantPulse = Math.sin(t * Math.PI) * 0.8;
+    }
+  }, () => {
+    for (let i = 1; i < 5; i++) {
+      postCards[i].visible = false;
+      postCards[i].opacity = 0;
+    }
+    qdrantCount = 20;
+    qdrantCheckmark = 1;
+    allProcessed = true;
+    finalLabel = 1;
+    qdrantPulse = 0;
+    for (let t of fastFwdState.trails) t.active = false;
+    for (let s of stageBoxes) s.active = false;
+  });
+}
+
+// ---------- UI ----------
+function updateUI() {
+  document.getElementById('stepNum').textContent = 'Passo ' + currentStep + ' di 6';
+  document.getElementById('stepTitle').textContent = STEP_TITLES[currentStep] || '';
+}
+
+// ---------- INPUT ----------
+document.addEventListener('keydown', (e) => {
+  if (animating) return;
+  switch(e.code) {
+    case 'Space':
+    case 'ArrowRight':
+      e.preventDefault();
+      advanceStep();
+      break;
+    case 'ArrowLeft':
+      e.preventDefault();
+      goBack();
+      break;
+    case 'KeyR':
+      e.preventDefault();
+      resetAll();
+      break;
+  }
+});
+
+// Touch support for presentation clickers
+canvas.addEventListener('click', (e) => {
+  if (animating) return;
+  if (e.clientX > W / 2) advanceStep();
+  else goBack();
+});
+
+// ---------- INIT ----------
+window.addEventListener('resize', () => { resize(); });
+
+// Toast
+const toast = document.getElementById('toast');
+setTimeout(() => { toast.style.opacity = '0'; }, 3000);
+setTimeout(() => { toast.remove(); }, 3600);
+
+document.fonts.ready.then(() => {
+  resize();
+  updateUI();
+  requestAnimationFrame(loop);
+});
+
+})();
+</script>
+</body>
+</html>

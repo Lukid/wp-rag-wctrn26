@@ -1,0 +1,403 @@
+{
+    "updatedAt": "2026-04-11T13:56:35.866Z",
+    "createdAt": "2026-04-10T19:55:12.467Z",
+    "id": "zAc1Ry4kqOu6zkVh",
+    "name": "[RAG Demo] Ingestione Contenuti",
+    "description": null,
+    "active": false,
+    "isArchived": false,
+    "nodes": [
+        {
+            "parameters": {},
+            "id": "d0a00001-0001-0001-0001-000000000001",
+            "name": "Avvia Ingestione",
+            "type": "n8n-nodes-base.manualTrigger",
+            "typeVersion": 1,
+            "position": [
+                0,
+                304
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "createCollection",
+                "collectionName": "meraviglie_pisa",
+                "vectors": "{\n  \"dense\": {\n    \"size\": 3072,\n    \"distance\": \"Cosine\"\n  }\n}",
+                "sparseVectors": "{\n  \"bm25\": {\n    \"modifier\": \"idf\"\n  }\n}",
+                "requestOptions": {}
+            },
+            "id": "d0a00001-0001-0001-0001-000000000002",
+            "name": "Crea Collezione",
+            "type": "n8n-nodes-qdrant.qdrant",
+            "typeVersion": 1,
+            "position": [
+                240,
+                304
+            ],
+            "credentials": {
+                "qdrantRestApi": {
+                    "id": "F17u2fwWxstxwqvW",
+                    "name": "Qdrant account 2"
+                }
+            },
+            "continueOnFail": true
+        },
+        {
+            "parameters": {
+                "url": "https://meraviglie-pisa.test/airc-sitemap.json",
+                "options": {
+                    "allowUnauthorizedCerts": true
+                }
+            },
+            "id": "d0a00001-0001-0001-0001-000000000003",
+            "name": "Leggi Sitemap WP",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                464,
+                304
+            ]
+        },
+        {
+            "parameters": {
+                "fieldToSplitOut": "posts",
+                "options": {}
+            },
+            "id": "d0a00001-0001-0001-0001-000000000004",
+            "name": "Espandi Lista Post",
+            "type": "n8n-nodes-base.splitOut",
+            "typeVersion": 1,
+            "position": [
+                688,
+                304
+            ]
+        },
+        {
+            "parameters": {
+                "url": "={{ $json.url }}",
+                "options": {
+                    "allowUnauthorizedCerts": true,
+                    "response": {
+                        "response": {
+                            "responseFormat": "text"
+                        }
+                    }
+                }
+            },
+            "id": "d0a00001-0001-0001-0001-000000000005",
+            "name": "Scarica Contenuto",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                912,
+                304
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "jsCode": "// Parsing dei contenuti WordPress e preparazione chunks\nconst chunks = [];\nlet totalWords = 0;\n\nfor (const item of $input.all()) {\n  const md = item.json.data;\n  const match = md.match(/^---\\n([\\s\\S]*?)\\n---\\n([\\s\\S]*)$/);\n  if (!match) continue;\n\n  const fm = match[1];\n  const content = match[2].trim();\n\n  // Estrai metadati dal frontmatter\n  const title = (fm.match(/title:\\s*(.+)/)?.[1] || '')\n    .replace(/^[\"']|[\"']$/g, '').trim();\n  const url = (fm.match(/url:\\s*\"([^\"]+)\"/)?.[1] || '').trim();\n  const postType = (fm.match(/post_type:\\s*(\\w+)/)?.[1] || '').trim();\n\n  const catBlock = fm.match(/categories:\\n((?:\\s+-\\s+.+\\n?)*)/);\n  const categories = catBlock\n    ? (catBlock[1].match(/-\\s+(.+)/g) || []).map(c => c.replace(/^-\\s+/, '').trim())\n    : [];\n\n  // Un chunk per post (contenuti brevi, ideali per la demo)\n  const text = title + '\\n\\n' + content;\n  totalWords += text.split(/\\s+/).length;\n  chunks.push({ text, title, url, post_type: postType, categories });\n}\n\n// Lunghezza media testi per BM25\nconst avgLen = Math.round(totalWords / chunks.length);\n\nreturn chunks.map((c, i) => ({\n  json: { ...c, chunk_id: i, avg_len: avgLen }\n}));"
+            },
+            "id": "d0a00001-0001-0001-0001-000000000006",
+            "name": "Parsing e Chunks",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1120,
+                304
+            ]
+        },
+        {
+            "parameters": {
+                "batchSize": 10,
+                "options": {
+                    "reset": false
+                }
+            },
+            "id": "d0a00001-0001-0001-0001-000000000007",
+            "name": "Loop per Batch",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                1344,
+                304
+            ]
+        },
+        {
+            "parameters": {
+                "aggregate": "aggregateAllItemData",
+                "destinationFieldName": "batch",
+                "options": {}
+            },
+            "id": "d0a00001-0001-0001-0001-000000000008",
+            "name": "Aggrega Batch",
+            "type": "n8n-nodes-base.aggregate",
+            "typeVersion": 1,
+            "position": [
+                1568,
+                432
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.openai.com/v1/embeddings",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "openAiApi",
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "input",
+                            "value": "={{ $json.batch.map(item => item.text) }}"
+                        },
+                        {
+                            "name": "model",
+                            "value": "text-embedding-3-large"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "d0a00001-0001-0001-0001-000000000009",
+            "name": "Embedding OpenAI",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1792,
+                432
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "FNKVVjlaCXAocWHU",
+                    "name": "OpenAI account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Combina embedding densi + BM25 sparsi e formatta per Qdrant\nconst batch = $('Aggrega Batch').first().json.batch;\nconst embeddings = $input.first().json.data;\n\nconst points = batch.map((item, i) => ({\n  id: item.chunk_id,\n  payload: {\n    text: item.text,\n    title: item.title,\n    url: item.url,\n    post_type: item.post_type,\n    categories: item.categories\n  },\n  vector: {\n    dense: embeddings[i].embedding,\n    bm25: {\n      text: item.text,\n      model: \"qdrant/bm25\",\n      options: { avg_len: item.avg_len }\n    }\n  }\n}));\n\nreturn [{ json: { points } }];"
+            },
+            "id": "d0a00001-0001-0001-0001-000000000010",
+            "name": "Prepara Punti",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2000,
+                432
+            ]
+        },
+        {
+            "parameters": {
+                "resource": "point",
+                "operation": "upsertPoints",
+                "collectionName": "meraviglie_pisa",
+                "points": "={{ JSON.stringify($json.points) }}",
+                "requestOptions": {}
+            },
+            "id": "d0a00001-0001-0001-0001-000000000011",
+            "name": "Salva in Qdrant",
+            "type": "n8n-nodes-qdrant.qdrant",
+            "typeVersion": 1,
+            "position": [
+                2224,
+                432
+            ],
+            "credentials": {
+                "qdrantRestApi": {
+                    "id": "F17u2fwWxstxwqvW",
+                    "name": "Qdrant account 2"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "content": "## [RAG Demo] Ingestione Contenuti\nPipeline: **WordPress (AI Ready Content)** \u2192 Fetch markdown \u2192 Parsing \u2192 Embedding denso (OpenAI) + sparso (BM25) \u2192 **Qdrant** (hybrid search)\n\nCollezione: `meraviglie_pisa` con named vectors `dense` + `bm25`",
+                "height": 180,
+                "width": 580
+            },
+            "id": "d0a00001-0001-0001-0001-000000000090",
+            "name": "Sticky Note",
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                -16,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "content": "## Embedding e Storage\nPer ogni batch: genera embedding densi con **OpenAI text-embedding-3-large** (3072 dim), poi Qdrant genera automaticamente i vettori sparsi **BM25** server-side.\nRisultato: hybrid search = ricerca semantica + keyword.",
+                "width": 940
+            },
+            "id": "d0a00001-0001-0001-0001-000000000091",
+            "name": "Sticky Note1",
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                1328,
+                80
+            ]
+        }
+    ],
+    "connections": {
+        "Avvia Ingestione": {
+            "main": [
+                [
+                    {
+                        "node": "Crea Collezione",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Crea Collezione": {
+            "main": [
+                [
+                    {
+                        "node": "Leggi Sitemap WP",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Leggi Sitemap WP": {
+            "main": [
+                [
+                    {
+                        "node": "Espandi Lista Post",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Espandi Lista Post": {
+            "main": [
+                [
+                    {
+                        "node": "Scarica Contenuto",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Scarica Contenuto": {
+            "main": [
+                [
+                    {
+                        "node": "Parsing e Chunks",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Parsing e Chunks": {
+            "main": [
+                [
+                    {
+                        "node": "Loop per Batch",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Loop per Batch": {
+            "main": [
+                [],
+                [
+                    {
+                        "node": "Aggrega Batch",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Aggrega Batch": {
+            "main": [
+                [
+                    {
+                        "node": "Embedding OpenAI",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Embedding OpenAI": {
+            "main": [
+                [
+                    {
+                        "node": "Prepara Punti",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepara Punti": {
+            "main": [
+                [
+                    {
+                        "node": "Salva in Qdrant",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Salva in Qdrant": {
+            "main": [
+                [
+                    {
+                        "node": "Loop per Batch",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "callerPolicy": "workflowsFromSameOwner",
+        "availableInMCP": false,
+        "binaryMode": "separate"
+    },
+    "staticData": null,
+    "meta": {
+        "templateCredsSetupCompleted": true
+    },
+    "pinData": {},
+    "versionId": "251367e6-65cf-48c4-9a0f-1b05c46d7db7",
+    "activeVersionId": null,
+    "versionCounter": 4,
+    "triggerCount": 0,
+    "shared": [
+        {
+            "updatedAt": "2026-04-10T19:55:12.469Z",
+            "createdAt": "2026-04-10T19:55:12.469Z",
+            "role": "workflow:owner",
+            "workflowId": "zAc1Ry4kqOu6zkVh",
+            "projectId": "3d2drVk8nkGwtAX7",
+            "project": {
+                "updatedAt": "2026-04-10T15:10:18.241Z",
+                "createdAt": "2026-04-10T15:08:57.729Z",
+                "id": "3d2drVk8nkGwtAX7",
+                "name": "Luca Baroncini <lucabaroncini34@gmail.com>",
+                "type": "personal",
+                "icon": null,
+                "description": null,
+                "creatorId": "34e2c14c-5a18-4ca8-8a74-0c5cd4e9ebc7"
+            }
+        }
+    ],
+    "tags": [],
+    "activeVersion": null
+}

@@ -1,0 +1,766 @@
+{
+    "updatedAt": "2026-04-11T10:49:29.148Z",
+    "createdAt": "2026-04-11T08:59:17.323Z",
+    "id": "3EPJSm2quMQ1AuUK",
+    "name": "[RAG Demo] Query Chatbot",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+        {
+            "parameters": {
+                "options": {}
+            },
+            "id": "q0b00001-0001-0001-0001-000000000001",
+            "name": "Domanda in Chat",
+            "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+            "typeVersion": 1.1,
+            "position": [
+                0,
+                208
+            ],
+            "webhookId": "5b79b303-97b1-4cde-990b-f54aebd189a2"
+        },
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "rag-chat",
+                "responseMode": "lastNode",
+                "options": {
+                    "allowedOrigins": "*"
+                }
+            },
+            "id": "q0b00001-0001-0001-0001-000000000011",
+            "name": "Ricevi Domanda",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                0,
+                432
+            ],
+            "webhookId": "699a79f5-978f-4975-9678-030d1c85585f"
+        },
+        {
+            "parameters": {
+                "jsCode": "// Normalizza input da Chat (editor n8n) o Webhook (chat.html)\nconst message = $json.chatInput || ($json.body && $json.body.message) || '';\nreturn [{ json: { message } }];"
+            },
+            "id": "q0b00001-0001-0001-0001-000000000012",
+            "name": "Normalizza Input",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                320,
+                304
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.openai.com/v1/embeddings",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "openAiApi",
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "input",
+                            "value": "={{ $json.message }}"
+                        },
+                        {
+                            "name": "model",
+                            "value": "text-embedding-3-large"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "q0b00001-0001-0001-0001-000000000002",
+            "name": "Embedding Domanda",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                608,
+                304
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "FNKVVjlaCXAocWHU",
+                    "name": "OpenAI account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Costruisce la query ibrida per Qdrant\n// Prefetch: dense (semantico) + BM25 (keyword), fusione con RRF\nconst embedding = $json.data[0].embedding;\nconst userQuery = $('Normalizza Input').first().json.message;\n\nconst queryBody = {\n  prefetch: [\n    {\n      query: embedding,\n      using: \"dense\",\n      limit: 20\n    },\n    {\n      query: {\n        text: userQuery,\n        model: \"qdrant/bm25\"\n      },\n      using: \"bm25\",\n      limit: 20\n    }\n  ],\n  query: { fusion: \"rrf\" },\n  limit: 10,\n  with_payload: true\n};\n\nreturn [{ json: { queryBody, userQuery } }];"
+            },
+            "id": "q0b00001-0001-0001-0001-000000000003",
+            "name": "Prepara Query Ibrida",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                880,
+                304
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://qdrant:6333/collections/meraviglie_pisa/points/query",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify($json.queryBody) }}",
+                "options": {}
+            },
+            "id": "q0b00001-0001-0001-0001-000000000004",
+            "name": "Cerca in Qdrant",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1168,
+                304
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Prepara i documenti per il reranking con Cohere\nconst points = $json.result.points;\nconst userQuery = $('Normalizza Input').first().json.message;\n\nconst rerankerBody = {\n  model: \"rerank-v4.0-pro\",\n  query: userQuery,\n  documents: points.map(p => p.payload.text),\n  top_n: 5\n};\n\n// Conserva i metadati originali per costruire il prompt\nconst metadata = points.map(p => ({\n  title: p.payload.title,\n  url: p.payload.url,\n  text: p.payload.text,\n  score_qdrant: p.score\n}));\n\nreturn [{ json: { rerankerBody, metadata } }];"
+            },
+            "id": "q0b00001-0001-0001-0001-000000000005",
+            "name": "Prepara Rerank",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1424,
+                304
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.cohere.com/v2/rerank",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "cohereApi",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify($json.rerankerBody) }}",
+                "options": {}
+            },
+            "id": "q0b00001-0001-0001-0001-000000000006",
+            "name": "Rerank Cohere",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1680,
+                304
+            ],
+            "credentials": {
+                "cohereApi": {
+                    "id": "wYM3C93wI9UMWLWf",
+                    "name": "Cohere account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Costruisce il prompt con contesto dai risultati reranked\nconst reranked = $json.results;\nconst metadata = $('Prepara Rerank').first().json.metadata;\nconst userQuery = $('Normalizza Input').first().json.message;\n\n// Contesto dai risultati migliori dopo reranking\nconst contextParts = reranked.map(r => {\n  const meta = metadata[r.index];\n  return `### ${meta.title}\\n${meta.text}\\n(Fonte: ${meta.url})`;\n});\nconst context = contextParts.join('\\n\\n---\\n\\n');\n\n// Fonti per la risposta\nconst sources = reranked.map(r => ({\n  title: metadata[r.index].title,\n  url: metadata[r.index].url\n}));\n\nconst systemMessage = `Sei l'assistente virtuale del sito \"Le Meraviglie Segrete di Pisa\", un sito turistico dedicato alle curiosit\\u00e0 e ai segreti di Pisa.\\n\\nRispondi in italiano, con tono amichevole e i classici modi di dire pisani.\\n\\nREGOLE:\\n- Rispondi SOLO basandoti sul contesto fornito qui sotto\\n- Se la risposta non \\u00e8 nel contesto, d\\u00ec chiaramente che non hai informazioni su questo argomento\\n- Cita le fonti quando possibile\\n- Sii conciso ma completo\\n- Menziona TUTTE le fonti fornite nel contesto, dando priorit\u00e0 a quelle elencate per prime.\\n\\nCONTESTO:\\n${context}`;\n\nconst requestBody = {\n  model: \"gpt-5.4-mini\",\n  messages: [\n    { role: \"system\", content: systemMessage },\n    { role: \"user\", content: userQuery }\n  ],\n  temperature: 0.3\n};\n\nreturn [{ json: { requestBody, sources } }];"
+            },
+            "id": "q0b00001-0001-0001-0001-000000000007",
+            "name": "Costruisci Prompt",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1968,
+                304
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "openAiApi",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify($json.requestBody) }}",
+                "options": {}
+            },
+            "id": "q0b00001-0001-0001-0001-000000000008",
+            "name": "Genera Risposta",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                2240,
+                304
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "FNKVVjlaCXAocWHU",
+                    "name": "OpenAI account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Formatta la risposta finale con le fonti\nconst response = $json.choices[0].message.content;\nconst sources = $('Costruisci Prompt').first().json.sources;\n\n// Fonti uniche\nconst seen = new Set();\nconst uniqueSources = sources.filter(s => {\n  if (seen.has(s.url)) return false;\n  seen.add(s.url);\n  return true;\n});\n\nconst sourceList = uniqueSources\n  .map(s => `- ${s.title}: ${s.url}`)\n  .join('\\n');\n\nconst output = response + '\\n\\nFonti:\\n' + sourceList;\n\nreturn [{ json: { output } }];"
+            },
+            "id": "q0b00001-0001-0001-0001-000000000009",
+            "name": "Rispondi con Fonti",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2528,
+                304
+            ]
+        },
+        {
+            "parameters": {
+                "content": "## [RAG Demo] Query Chatbot\nDue entry point:\n- **Chat editor** (nodi si accendono live) \u2192 per la demo dal palco\n- **Webhook POST /rag-chat** \u2192 per chat.html\n\nPipeline: Embedding \u2192 Qdrant hybrid (dense+BM25\u2192RRF) \u2192 Cohere Rerank \u2192 GPT-5.4-mini \u2192 Risposta",
+                "height": 180,
+                "width": 580
+            },
+            "id": "q0b00001-0001-0001-0001-000000000090",
+            "name": "Sticky Note",
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                -16,
+                32
+            ]
+        },
+        {
+            "parameters": {
+                "content": "## Ricerca Ibrida + Reranking\n**Prefetch**: ricerca semantica (dense) + keyword (BM25) in parallelo\n**Fusione RRF**: Reciprocal Rank Fusion combina i due ranking\n**Rerank**: Cohere rerank-v4.0-pro riordina per rilevanza finale",
+                "height": 140,
+                "width": 820
+            },
+            "id": "q0b00001-0001-0001-0001-000000000091",
+            "name": "Sticky Note1",
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                1120,
+                32
+            ]
+        }
+    ],
+    "connections": {
+        "Domanda in Chat": {
+            "main": [
+                [
+                    {
+                        "node": "Normalizza Input",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Ricevi Domanda": {
+            "main": [
+                [
+                    {
+                        "node": "Normalizza Input",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Normalizza Input": {
+            "main": [
+                [
+                    {
+                        "node": "Embedding Domanda",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Embedding Domanda": {
+            "main": [
+                [
+                    {
+                        "node": "Prepara Query Ibrida",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepara Query Ibrida": {
+            "main": [
+                [
+                    {
+                        "node": "Cerca in Qdrant",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Cerca in Qdrant": {
+            "main": [
+                [
+                    {
+                        "node": "Prepara Rerank",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepara Rerank": {
+            "main": [
+                [
+                    {
+                        "node": "Rerank Cohere",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Rerank Cohere": {
+            "main": [
+                [
+                    {
+                        "node": "Costruisci Prompt",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Costruisci Prompt": {
+            "main": [
+                [
+                    {
+                        "node": "Genera Risposta",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Genera Risposta": {
+            "main": [
+                [
+                    {
+                        "node": "Rispondi con Fonti",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "callerPolicy": "workflowsFromSameOwner",
+        "availableInMCP": false,
+        "binaryMode": "separate"
+    },
+    "staticData": null,
+    "meta": null,
+    "pinData": {},
+    "versionId": "2a6e2f2b-813c-4354-baad-7f55107e160c",
+    "activeVersionId": "fe9941d1-f050-4370-8360-d8a913e0e8de",
+    "versionCounter": 71,
+    "triggerCount": 2,
+    "shared": [
+        {
+            "updatedAt": "2026-04-11T08:59:17.325Z",
+            "createdAt": "2026-04-11T08:59:17.325Z",
+            "role": "workflow:owner",
+            "workflowId": "3EPJSm2quMQ1AuUK",
+            "projectId": "3d2drVk8nkGwtAX7",
+            "project": {
+                "updatedAt": "2026-04-10T15:10:18.241Z",
+                "createdAt": "2026-04-10T15:08:57.729Z",
+                "id": "3d2drVk8nkGwtAX7",
+                "name": "Luca Baroncini <lucabaroncini34@gmail.com>",
+                "type": "personal",
+                "icon": null,
+                "description": null,
+                "creatorId": "34e2c14c-5a18-4ca8-8a74-0c5cd4e9ebc7"
+            }
+        }
+    ],
+    "tags": [],
+    "activeVersion": {
+        "updatedAt": "2026-04-11T09:36:30.426Z",
+        "createdAt": "2026-04-11T09:36:30.426Z",
+        "versionId": "fe9941d1-f050-4370-8360-d8a913e0e8de",
+        "workflowId": "3EPJSm2quMQ1AuUK",
+        "nodes": [
+            {
+                "id": "q0b00001-0001-0001-0001-000000000001",
+                "name": "Domanda in Chat",
+                "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+                "typeVersion": 1.1,
+                "position": [
+                    0,
+                    200
+                ],
+                "parameters": {
+                    "options": {}
+                },
+                "webhookId": "5b79b303-97b1-4cde-990b-f54aebd189a2"
+            },
+            {
+                "id": "q0b00001-0001-0001-0001-000000000011",
+                "name": "Ricevi Domanda",
+                "type": "n8n-nodes-base.webhook",
+                "typeVersion": 2,
+                "position": [
+                    0,
+                    420
+                ],
+                "parameters": {
+                    "httpMethod": "POST",
+                    "path": "rag-chat",
+                    "responseMode": "lastNode",
+                    "options": {
+                        "allowedOrigins": "*"
+                    }
+                },
+                "webhookId": "699a79f5-978f-4975-9678-030d1c85585f"
+            },
+            {
+                "id": "q0b00001-0001-0001-0001-000000000012",
+                "name": "Normalizza Input",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    320,
+                    304
+                ],
+                "parameters": {
+                    "jsCode": "// Normalizza input da Chat (editor n8n) o Webhook (chat.html)\nconst message = $json.chatInput || ($json.body && $json.body.message) || '';\nreturn [{ json: { message } }];"
+                }
+            },
+            {
+                "id": "q0b00001-0001-0001-0001-000000000002",
+                "name": "Embedding Domanda",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [
+                    600,
+                    304
+                ],
+                "parameters": {
+                    "method": "POST",
+                    "url": "https://api.openai.com/v1/embeddings",
+                    "authentication": "predefinedCredentialType",
+                    "nodeCredentialType": "openAiApi",
+                    "sendBody": true,
+                    "bodyParameters": {
+                        "parameters": [
+                            {
+                                "name": "input",
+                                "value": "={{ $json.message }}"
+                            },
+                            {
+                                "name": "model",
+                                "value": "text-embedding-3-large"
+                            }
+                        ]
+                    },
+                    "options": {}
+                },
+                "credentials": {
+                    "openAiApi": {
+                        "id": "FNKVVjlaCXAocWHU",
+                        "name": "OpenAI account"
+                    }
+                }
+            },
+            {
+                "id": "q0b00001-0001-0001-0001-000000000003",
+                "name": "Prepara Query Ibrida",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    880,
+                    304
+                ],
+                "parameters": {
+                    "jsCode": "// Costruisce la query ibrida per Qdrant\n// Prefetch: dense (semantico) + BM25 (keyword), fusione con RRF\nconst embedding = $json.data[0].embedding;\nconst userQuery = $('Normalizza Input').first().json.message;\n\nconst queryBody = {\n  prefetch: [\n    {\n      query: embedding,\n      using: \"dense\",\n      limit: 20\n    },\n    {\n      query: {\n        text: userQuery,\n        model: \"qdrant/bm25\"\n      },\n      using: \"bm25\",\n      limit: 20\n    }\n  ],\n  query: { fusion: \"rrf\" },\n  limit: 10,\n  with_payload: true\n};\n\nreturn [{ json: { queryBody, userQuery } }];"
+                }
+            },
+            {
+                "id": "q0b00001-0001-0001-0001-000000000004",
+                "name": "Cerca in Qdrant",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [
+                    1160,
+                    304
+                ],
+                "parameters": {
+                    "method": "POST",
+                    "url": "http://qdrant:6333/collections/meraviglie_pisa/points/query",
+                    "sendBody": true,
+                    "specifyBody": "json",
+                    "jsonBody": "={{ JSON.stringify($json.queryBody) }}",
+                    "options": {}
+                }
+            },
+            {
+                "id": "q0b00001-0001-0001-0001-000000000005",
+                "name": "Prepara Rerank",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    1420,
+                    304
+                ],
+                "parameters": {
+                    "jsCode": "// Prepara i documenti per il reranking con Cohere\nconst points = $json.result.points;\nconst userQuery = $('Normalizza Input').first().json.message;\n\nconst rerankerBody = {\n  model: \"rerank-v4.0-pro\",\n  query: userQuery,\n  documents: points.map(p => p.payload.text),\n  top_n: 5\n};\n\n// Conserva i metadati originali per costruire il prompt\nconst metadata = points.map(p => ({\n  title: p.payload.title,\n  url: p.payload.url,\n  text: p.payload.text,\n  score_qdrant: p.score\n}));\n\nreturn [{ json: { rerankerBody, metadata } }];"
+                }
+            },
+            {
+                "id": "q0b00001-0001-0001-0001-000000000006",
+                "name": "Rerank Cohere",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [
+                    1680,
+                    304
+                ],
+                "parameters": {
+                    "method": "POST",
+                    "url": "https://api.cohere.com/v2/rerank",
+                    "authentication": "predefinedCredentialType",
+                    "nodeCredentialType": "cohereApi",
+                    "sendBody": true,
+                    "specifyBody": "json",
+                    "jsonBody": "={{ JSON.stringify($json.rerankerBody) }}",
+                    "options": {}
+                },
+                "credentials": {
+                    "cohereApi": {
+                        "id": "wYM3C93wI9UMWLWf",
+                        "name": "Cohere account"
+                    }
+                }
+            },
+            {
+                "id": "q0b00001-0001-0001-0001-000000000007",
+                "name": "Costruisci Prompt",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    1960,
+                    304
+                ],
+                "parameters": {
+                    "jsCode": "// Costruisce il prompt con contesto dai risultati reranked\nconst reranked = $json.results;\nconst metadata = $('Prepara Rerank').first().json.metadata;\nconst userQuery = $('Normalizza Input').first().json.message;\n\n// Contesto dai risultati migliori dopo reranking\nconst contextParts = reranked.map(r => {\n  const meta = metadata[r.index];\n  return `### ${meta.title}\\n${meta.text}\\n(Fonte: ${meta.url})`;\n});\nconst context = contextParts.join('\\n\\n---\\n\\n');\n\n// Fonti per la risposta\nconst sources = reranked.map(r => ({\n  title: metadata[r.index].title,\n  url: metadata[r.index].url\n}));\n\nconst systemMessage = `Sei l'assistente virtuale del sito \"Le Meraviglie Segrete di Pisa\", un sito turistico dedicato alle curiosit\\u00e0 e ai segreti di Pisa.\\n\\nRispondi in italiano, con tono amichevole e un pizzico di umorismo toscano.\\n\\nREGOLE:\\n- Rispondi SOLO basandoti sul contesto fornito qui sotto\\n- Se la risposta non \\u00e8 nel contesto, d\\u00ec chiaramente che non hai informazioni su questo argomento\\n- Cita le fonti quando possibile\\n- Sii conciso ma completo\\n\\nCONTESTO:\\n${context}`;\n\nconst requestBody = {\n  model: \"gpt-5.4-mini\",\n  messages: [\n    { role: \"system\", content: systemMessage },\n    { role: \"user\", content: userQuery }\n  ],\n  temperature: 0.3\n};\n\nreturn [{ json: { requestBody, sources } }];"
+                }
+            },
+            {
+                "id": "q0b00001-0001-0001-0001-000000000008",
+                "name": "Genera Risposta",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [
+                    2240,
+                    304
+                ],
+                "parameters": {
+                    "method": "POST",
+                    "url": "https://api.openai.com/v1/chat/completions",
+                    "authentication": "predefinedCredentialType",
+                    "nodeCredentialType": "openAiApi",
+                    "sendBody": true,
+                    "specifyBody": "json",
+                    "jsonBody": "={{ JSON.stringify($json.requestBody) }}",
+                    "options": {}
+                },
+                "credentials": {
+                    "openAiApi": {
+                        "id": "FNKVVjlaCXAocWHU",
+                        "name": "OpenAI account"
+                    }
+                }
+            },
+            {
+                "id": "q0b00001-0001-0001-0001-000000000009",
+                "name": "Rispondi con Fonti",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    2520,
+                    304
+                ],
+                "parameters": {
+                    "jsCode": "// Formatta la risposta finale con le fonti\nconst response = $json.choices[0].message.content;\nconst sources = $('Costruisci Prompt').first().json.sources;\n\n// Fonti uniche\nconst seen = new Set();\nconst uniqueSources = sources.filter(s => {\n  if (seen.has(s.url)) return false;\n  seen.add(s.url);\n  return true;\n});\n\nconst sourceList = uniqueSources\n  .map(s => `- ${s.title}: ${s.url}`)\n  .join('\\n');\n\nconst output = response + '\\n\\nFonti:\\n' + sourceList;\n\nreturn [{ json: { output } }];"
+                }
+            },
+            {
+                "id": "q0b00001-0001-0001-0001-000000000090",
+                "name": "Sticky Note",
+                "type": "n8n-nodes-base.stickyNote",
+                "typeVersion": 1,
+                "position": [
+                    -16,
+                    20
+                ],
+                "parameters": {
+                    "content": "## [RAG Demo] Query Chatbot\nDue entry point:\n- **Chat editor** (nodi si accendono live) \u2192 per la demo dal palco\n- **Webhook POST /rag-chat** \u2192 per chat.html\n\nPipeline: Embedding \u2192 Qdrant hybrid (dense+BM25\u2192RRF) \u2192 Cohere Rerank \u2192 GPT-5.4-mini \u2192 Risposta",
+                    "width": 580,
+                    "height": 180
+                }
+            },
+            {
+                "id": "q0b00001-0001-0001-0001-000000000091",
+                "name": "Sticky Note1",
+                "type": "n8n-nodes-base.stickyNote",
+                "typeVersion": 1,
+                "position": [
+                    1120,
+                    20
+                ],
+                "parameters": {
+                    "content": "## Ricerca Ibrida + Reranking\n**Prefetch**: ricerca semantica (dense) + keyword (BM25) in parallelo\n**Fusione RRF**: Reciprocal Rank Fusion combina i due ranking\n**Rerank**: Cohere rerank-v4.0-pro riordina per rilevanza finale",
+                    "width": 820,
+                    "height": 140
+                }
+            }
+        ],
+        "connections": {
+            "Domanda in Chat": {
+                "main": [
+                    [
+                        {
+                            "node": "Normalizza Input",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Ricevi Domanda": {
+                "main": [
+                    [
+                        {
+                            "node": "Normalizza Input",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Normalizza Input": {
+                "main": [
+                    [
+                        {
+                            "node": "Embedding Domanda",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Embedding Domanda": {
+                "main": [
+                    [
+                        {
+                            "node": "Prepara Query Ibrida",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Prepara Query Ibrida": {
+                "main": [
+                    [
+                        {
+                            "node": "Cerca in Qdrant",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Cerca in Qdrant": {
+                "main": [
+                    [
+                        {
+                            "node": "Prepara Rerank",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Prepara Rerank": {
+                "main": [
+                    [
+                        {
+                            "node": "Rerank Cohere",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Rerank Cohere": {
+                "main": [
+                    [
+                        {
+                            "node": "Costruisci Prompt",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Costruisci Prompt": {
+                "main": [
+                    [
+                        {
+                            "node": "Genera Risposta",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Genera Risposta": {
+                "main": [
+                    [
+                        {
+                            "node": "Rispondi con Fonti",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            }
+        },
+        "authors": "Luca Baroncini",
+        "name": null,
+        "description": null,
+        "autosaved": false,
+        "workflowPublishHistory": [
+            {
+                "createdAt": "2026-04-11T09:36:30.458Z",
+                "id": 21,
+                "workflowId": "3EPJSm2quMQ1AuUK",
+                "versionId": "fe9941d1-f050-4370-8360-d8a913e0e8de",
+                "event": "activated",
+                "userId": "34e2c14c-5a18-4ca8-8a74-0c5cd4e9ebc7"
+            },
+            {
+                "createdAt": "2026-04-11T09:36:30.447Z",
+                "id": 20,
+                "workflowId": "3EPJSm2quMQ1AuUK",
+                "versionId": "fe9941d1-f050-4370-8360-d8a913e0e8de",
+                "event": "deactivated",
+                "userId": "34e2c14c-5a18-4ca8-8a74-0c5cd4e9ebc7"
+            }
+        ]
+    }
+}

@@ -1,0 +1,1421 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2. Pipeline Query — WordCamp Torino 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100vw; height: 100vh; overflow: hidden;
+    font-family: 'Inter', sans-serif;
+    background: #F5EDE3;
+  }
+  #top-bar {
+    height: 48px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; background: #fff; border-bottom: 2px solid #E8DDD0;
+    position: relative; z-index: 10;
+  }
+  #top-bar .title { font-weight: 700; font-size: 16px; color: #1D1D1B; }
+  #top-bar .event { font-weight: 400; font-size: 13px; color: #9CA3AF; }
+  #canvas-wrap {
+    position: relative; width: 100%; height: calc(100vh - 96px);
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+  #bottom-bar {
+    height: 48px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; background: #1D1D1B; position: relative; z-index: 10;
+  }
+  #bottom-bar .step-num { font-weight: 600; font-size: 14px; color: #fff; }
+  #bottom-bar .step-title { font-weight: 600; font-size: 14px; color: #E8643C;
+    position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; }
+  #bottom-bar .controls { font-weight: 400; font-size: 12px; color: #9CA3AF; }
+  #toast {
+    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+    background: rgba(29,29,27,0.88); color: #fff; padding: 10px 24px;
+    border-radius: 8px; font-size: 13px; font-weight: 600;
+    opacity: 0; transition: opacity 0.5s; z-index: 100; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="top-bar">
+  <span class="title">Pipeline di Query RAG</span>
+  <span class="event">WordCamp Torino 2026</span>
+</div>
+<div id="canvas-wrap">
+  <canvas id="c"></canvas>
+</div>
+<div id="bottom-bar">
+  <span class="step-num" id="step-num">Passo 0 di 7</span>
+  <span class="step-title" id="step-title">Pipeline di query</span>
+  <span class="controls">SPAZIO = avanti | &larr; = indietro | R = reset</span>
+</div>
+<div id="toast">Premi F11 per lo schermo intero</div>
+
+<script>
+(function() {
+"use strict";
+
+// ── Colors ──
+const C = {
+  bg: '#F5EDE3', orange: '#E8643C', orangeDark: '#D4532B', dark: '#1D1D1B',
+  blue: '#2563EB', green: '#16A34A', purple: '#7C3AED', gray: '#6B7280',
+  lightGray: '#9CA3AF', beige: '#E8DDD0', white: '#FFFFFF'
+};
+
+const STEP_TITLES = [
+  'Pipeline di query',
+  "L'utente fa una domanda",
+  'La domanda diventa un vettore',
+  'Ricerca ibrida',
+  'Reranking',
+  'Costruisci il prompt',
+  "L'LLM genera la risposta",
+  'Il RAG in azione'
+];
+
+const STAGES = [
+  { emoji: '\uD83D\uDCAC', label: 'Domanda',   color: C.orange },
+  { emoji: '\uD83D\uDD22', label: 'Embedding',  color: C.blue },
+  { emoji: '\uD83D\uDD0D', label: 'Ricerca',    color: C.purple },
+  { emoji: '\uD83D\uDCCA', label: 'Rerank',     color: C.green },
+  { emoji: '\uD83E\uDDE0', label: 'LLM',        color: C.orange },
+  { emoji: '\u2705',       label: 'Risposta',   color: C.green }
+];
+
+// ── Canvas setup ──
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const dpr = window.devicePixelRatio || 1;
+let W, H; // logical canvas size
+
+function resize() {
+  const wrap = document.getElementById('canvas-wrap');
+  W = wrap.clientWidth;
+  H = wrap.clientHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  computeLayout();
+}
+
+// ── Layout ──
+let stageRects = []; // {x, y, w, h} for each stage
+let arrowSegs = [];  // {x1,y1,x2,y2} between stages
+const STAGE_GAP_RATIO = 0.025;
+const STAGE_WIDTH_RATIO = 0.13;
+const STAGE_HEIGHT_RATIO = 0.55;
+const MARGIN_X_RATIO = 0.04;
+
+function computeLayout() {
+  stageRects = [];
+  arrowSegs = [];
+  const marginX = W * MARGIN_X_RATIO;
+  const totalGaps = (STAGES.length - 1) * W * STAGE_GAP_RATIO;
+  const stageW = (W - 2 * marginX - totalGaps) / STAGES.length;
+  const stageH = H * STAGE_HEIGHT_RATIO;
+  const stageY = (H - stageH) / 2;
+  const gap = W * STAGE_GAP_RATIO;
+
+  for (let i = 0; i < STAGES.length; i++) {
+    const x = marginX + i * (stageW + gap);
+    stageRects.push({ x, y: stageY, w: stageW, h: stageH });
+  }
+  for (let i = 0; i < STAGES.length - 1; i++) {
+    const r1 = stageRects[i], r2 = stageRects[i + 1];
+    arrowSegs.push({
+      x1: r1.x + r1.w, y1: r1.y + r1.h / 2,
+      x2: r2.x, y2: r2.y + r2.h / 2
+    });
+  }
+}
+
+// ── State ──
+let currentStep = 0;
+let animating = false;
+let animStartTime = 0;
+let animPhase = '';
+let now = 0;
+
+// Per-step state
+let typewriterText = '';
+let typewriterChars = 0;
+let cursorVisible = true;
+let cursorBlinkStart = 0;
+
+// Step 2 state
+let embeddingPhase = ''; // 'particles', 'textShow', 'transform', 'coalesce'
+let embeddingNumbers = [];
+let embeddingTransformProgress = 0;
+let embeddingCoalesceProgress = 0;
+let embeddingParticles = [];
+
+// Step 3 state
+let searchPhase = ''; // 'enter', 'radar', 'bm25'
+let radarTime = 0;
+let dotPositions = [];
+let litDots = [];
+let bm25Alpha = 0;
+let queryPointX = 0;
+
+// Step 4 state
+let rerankPhase = ''; // 'fly', 'sort', 'highlight'
+let rerankItems = [];
+let rerankSorted = false;
+let rerankLabelAlpha = 0;
+
+// Step 5 state
+let promptPhase = ''; // 'fly', 'build'
+let promptBuildProgress = 0;
+
+// Step 6 state
+let thinkingPhase = ''; // 'thinking', 'flow', 'typewriter'
+let thinkingDots = 0;
+let responseChars = 0;
+let responseLines = [];
+let responseLineIndex = 0;
+let responseCharInLine = 0;
+let lastResponseCharTime = 0;
+let lastResponseLineTime = 0;
+
+// Step 7 state
+let finalGlowProgress = 0;
+let bannerAlpha = 0;
+
+// Arrow particles
+let activeArrows = new Set();
+let arrowParticles = []; // {arrowIdx, t, speed}
+let lastParticleSpawn = 0;
+
+// ── Seeded random for dot positions ──
+function seededRandom(seed) {
+  let s = seed;
+  return function() {
+    s = (s * 16807 + 0) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+const DOC_NAMES = [
+  'Schiacce', 'Montino', 'Dove mangiare', 'Pisa bambini', 'Guida gastronomica',
+  'Torre Pendente', 'Orto Botanico', 'Pisa di notte', 'Keith Haring', 'Lungarni',
+  'Cecina', 'Rivalità PiLi', 'Come arrivare', 'Piazza Miracoli', 'San Rossore',
+  'Luminara', 'Gioco del Ponte', 'Normalisti', 'Tuttomondo', 'Terme'
+];
+
+function initDotPositions() {
+  const rng = seededRandom(42);
+  const r3 = stageRects[2];
+  const cx = r3.x + r3.w * 0.45;
+  const cy = r3.y + r3.h * 0.5;
+  const radiusX = r3.w * 0.32;
+  const radiusY = r3.h * 0.32;
+  dotPositions = [];
+  for (let i = 0; i < 20; i++) {
+    const angle = rng() * Math.PI * 2;
+    const dist = Math.sqrt(rng()) * 0.95;
+    dotPositions.push({
+      x: cx + Math.cos(angle) * dist * radiusX,
+      y: cy + Math.sin(angle) * dist * radiusY,
+      name: DOC_NAMES[i],
+      lit: false,
+      litSize: 5,
+      litAlpha: 0.35,
+      labelAlpha: 0
+    });
+  }
+}
+
+// ── Easing ──
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+function easeOutCubic(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
+function clamp01(t) { return Math.max(0, Math.min(1, t)); }
+
+// ── Hex to RGBA ──
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ── Drawing helpers ──
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function drawArrowhead(x, y, angle, size, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(-size, -size * 0.5);
+  ctx.lineTo(-size, size * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function wrapText(text, maxWidth, fontSize) {
+  ctx.font = `600 ${fontSize}px Inter`;
+  const words = text.split(' ');
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const test = line ? line + ' ' + word : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+// ── Scale helper ──
+function s(v) {
+  return v * Math.min(W / 1440, H / 760);
+}
+
+// ── Draw stage containers ──
+function drawStage(idx, active, glowColor) {
+  const r = stageRects[idx];
+  const stage = STAGES[idx];
+  const borderR = s(16);
+  const isFinal = currentStep === 7;
+
+  // Background
+  roundRect(r.x, r.y, r.w, r.h, borderR);
+  if (active) {
+    ctx.fillStyle = hexToRgba(C.white, 0.85);
+    ctx.fill();
+    // Shadow
+    ctx.save();
+    ctx.shadowColor = hexToRgba(stage.color, 0.15);
+    ctx.shadowBlur = s(12);
+    ctx.shadowOffsetY = s(2);
+    roundRect(r.x, r.y, r.w, r.h, borderR);
+    ctx.fill();
+    ctx.restore();
+    // Border
+    ctx.strokeStyle = glowColor || stage.color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([]);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = hexToRgba(C.white, 0.3);
+    ctx.fill();
+    ctx.strokeStyle = C.beige;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Emoji icon
+  const emojiSize = s(34);
+  ctx.font = `${emojiSize}px Inter`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = active ? C.dark : C.lightGray;
+  ctx.fillText(stage.emoji, r.x + r.w / 2, r.y + s(12));
+
+  // Label
+  const labelSize = s(14);
+  ctx.font = `600 ${labelSize}px Inter`;
+  ctx.fillStyle = active ? stage.color : C.lightGray;
+  ctx.fillText(stage.label, r.x + r.w / 2, r.y + s(12) + emojiSize + s(6));
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+}
+
+// ── Draw arrows ──
+function drawArrow(idx, active, color) {
+  const seg = arrowSegs[idx];
+  const midY = seg.y1;
+  ctx.beginPath();
+  ctx.moveTo(seg.x1, midY);
+  ctx.lineTo(seg.x2, midY);
+  if (active) {
+    ctx.strokeStyle = color || C.orange;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([]);
+  } else {
+    ctx.strokeStyle = C.beige;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Arrowhead
+  const ahColor = active ? (color || C.orange) : C.beige;
+  drawArrowhead(seg.x2 - 2, midY, 0, s(8), ahColor);
+}
+
+// ── Arrow particles ──
+function spawnArrowParticle(arrowIdx) {
+  arrowParticles.push({
+    arrowIdx,
+    t: 0,
+    speed: 0.008 + Math.random() * 0.004
+  });
+}
+
+function updateAndDrawArrowParticles() {
+  const toRemove = [];
+  for (let i = 0; i < arrowParticles.length; i++) {
+    const p = arrowParticles[i];
+    p.t += p.speed;
+    if (p.t > 1) { toRemove.push(i); continue; }
+    const seg = arrowSegs[p.arrowIdx];
+    if (!seg) continue;
+    const x = seg.x1 + (seg.x2 - seg.x1) * p.t;
+    const y = seg.y1;
+    const stage = STAGES[p.arrowIdx + 1];
+    ctx.beginPath();
+    ctx.arc(x, y, s(3), 0, Math.PI * 2);
+    ctx.fillStyle = hexToRgba(stage.color, 0.7);
+    ctx.fill();
+  }
+  for (let i = toRemove.length - 1; i >= 0; i--) {
+    arrowParticles.splice(toRemove[i], 1);
+  }
+}
+
+function maybeSpawnParticles() {
+  if (activeArrows.size === 0) return;
+  if (now - lastParticleSpawn > 100) {
+    lastParticleSpawn = now;
+    for (const idx of activeArrows) {
+      spawnArrowParticle(idx);
+    }
+  }
+}
+
+// ── Typewriter for question ──
+const QUESTION = 'Dove mangio una buona focaccia a Pisa?';
+
+function drawTypewriter(rect, chars, showCursor) {
+  const fontSize = s(14);
+  const maxW = rect.w - s(24);
+  ctx.font = `600 ${fontSize}px Inter`;
+  const allLines = wrapText(QUESTION, maxW, fontSize);
+
+  let totalDrawn = 0;
+  const lineHeight = fontSize * 1.45;
+  const totalLines = allLines.length;
+  const startY = rect.y + s(74) + (rect.h - s(74)) / 2 - (totalLines * lineHeight) / 2;
+
+  for (let li = 0; li < allLines.length; li++) {
+    const lineText = allLines[li];
+    const y = startY + li * lineHeight;
+    const x = rect.x + s(12);
+
+    let lineChars = 0;
+    if (totalDrawn + lineText.length <= chars) {
+      lineChars = lineText.length;
+    } else if (totalDrawn < chars) {
+      lineChars = chars - totalDrawn;
+    }
+    totalDrawn += lineText.length;
+
+    if (lineChars > 0) {
+      const sub = lineText.substring(0, lineChars);
+      ctx.fillStyle = C.dark;
+      ctx.font = `600 ${fontSize}px Inter`;
+      ctx.textBaseline = 'middle';
+      ctx.fillText(sub, x, y);
+
+      // Cursor after last drawn character
+      if (showCursor && totalDrawn >= chars && lineChars <= lineText.length) {
+        const cursorX = x + ctx.measureText(sub).width + 2;
+        const blinkOn = Math.floor(now / 400) % 2 === 0;
+        if (blinkOn) {
+          ctx.fillStyle = C.orange;
+          ctx.fillRect(cursorX, y - fontSize * 0.4, 2, fontSize * 0.8);
+        }
+      }
+    }
+  }
+  ctx.textBaseline = 'alphabetic';
+}
+
+// ── Step 2: Embedding ──
+const EMB_NUMBERS = [0.34, -0.91, 0.22, 0.67, -0.45, 0.18, -0.73, 0.56, 0.89, -0.12, 0.41, -0.65];
+
+function drawEmbeddingContent(rect, progress) {
+  // progress: 0-0.3 show text, 0.3-0.7 transform to numbers, 0.7-1.0 coalesce to point
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rect.x + 2, rect.y + 2, rect.w - 4, rect.h - 4);
+  ctx.clip();
+
+  const innerX = rect.x + s(12);
+  const innerY = rect.y + s(69);
+  const innerW = rect.w - s(24);
+  const innerH = rect.h - s(84);
+
+  if (progress < 0.3) {
+    // Show question text (smaller)
+    const fontSize = s(13);
+    const alpha = clamp01(progress / 0.15);
+    ctx.globalAlpha = alpha;
+    ctx.font = `600 ${fontSize}px Inter`;
+    ctx.fillStyle = C.dark;
+    const lines = wrapText(QUESTION, innerW, fontSize);
+    const lineH = fontSize * 1.4;
+    const startY = innerY + innerH * 0.3;
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], innerX, startY + i * lineH);
+    }
+    ctx.globalAlpha = 1;
+  } else if (progress < 0.7) {
+    // Transition: text fades out, numbers fade in
+    const t = (progress - 0.3) / 0.4;
+    const textAlpha = 1 - easeInOutCubic(clamp01(t * 2));
+    const numAlpha = easeInOutCubic(clamp01((t - 0.3) / 0.7));
+
+    // Fading text
+    if (textAlpha > 0.01) {
+      const fontSize = s(13);
+      ctx.globalAlpha = textAlpha;
+      ctx.font = `600 ${fontSize}px Inter`;
+      ctx.fillStyle = C.dark;
+      const lines = wrapText(QUESTION, innerW, fontSize);
+      const lineH = fontSize * 1.4;
+      const startY = innerY + innerH * 0.3;
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], innerX, startY + i * lineH);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // Numbers grid
+    if (numAlpha > 0.01) {
+      ctx.globalAlpha = numAlpha;
+      const fontSize = s(12);
+      ctx.font = `400 ${fontSize}px Inter`;
+      ctx.fillStyle = C.blue;
+      const cols = 3;
+      const cellW = innerW / cols;
+      const cellH = fontSize * 2;
+      const startY = innerY + innerH * 0.15;
+      for (let i = 0; i < EMB_NUMBERS.length; i++) {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = innerX + col * cellW + cellW / 2;
+        const y = startY + row * cellH;
+        ctx.textAlign = 'center';
+        ctx.fillText(EMB_NUMBERS[i].toFixed(2), x, y);
+      }
+      ctx.textAlign = 'left';
+      // "..." at end
+      const lastRow = Math.floor(EMB_NUMBERS.length / cols);
+      ctx.fillText('...', innerX + innerW / 2, startY + lastRow * cellH);
+      ctx.globalAlpha = 1;
+    }
+  } else {
+    // Coalesce to glowing point
+    const t = easeInOutCubic(clamp01((progress - 0.7) / 0.3));
+    const numAlpha = 1 - t;
+    const pointAlpha = t;
+
+    const centerX = rect.x + rect.w / 2;
+    const centerY = rect.y + rect.h * 0.5;
+
+    // Fading numbers that move toward center
+    if (numAlpha > 0.01) {
+      const fontSize = s(12);
+      ctx.font = `400 ${fontSize}px Inter`;
+      const cols = 3;
+      const cellW = innerW / cols;
+      const cellH = fontSize * 2;
+      const startY = innerY + innerH * 0.15;
+      for (let i = 0; i < EMB_NUMBERS.length; i++) {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const origX = innerX + col * cellW + cellW / 2;
+        const origY = startY + row * cellH;
+        const x = origX + (centerX - origX) * t;
+        const y = origY + (centerY - origY) * t;
+        ctx.globalAlpha = numAlpha * 0.6;
+        ctx.fillStyle = C.blue;
+        ctx.textAlign = 'center';
+        ctx.fillText(EMB_NUMBERS[i].toFixed(2), x, y);
+      }
+      ctx.textAlign = 'left';
+      ctx.globalAlpha = 1;
+    }
+
+    // Glowing point
+    if (pointAlpha > 0.1) {
+      const pulse = 1 + Math.sin(now / 400) * 0.15;
+      const r = s(10) * pulse * pointAlpha;
+      // Glow
+      const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, r * 3);
+      grad.addColorStop(0, hexToRgba(C.orange, 0.4 * pointAlpha));
+      grad.addColorStop(1, hexToRgba(C.orange, 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, r * 3, 0, Math.PI * 2);
+      ctx.fill();
+      // Point
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
+      ctx.fillStyle = hexToRgba(C.orange, pointAlpha);
+      ctx.fill();
+
+      // Label
+      ctx.globalAlpha = pointAlpha;
+      const lf = s(10);
+      ctx.font = `400 ${lf}px Inter`;
+      ctx.fillStyle = C.gray;
+      ctx.textAlign = 'center';
+      ctx.fillText('vettore query', centerX, centerY + r * 3 + lf);
+      ctx.textAlign = 'left';
+      ctx.globalAlpha = 1;
+    }
+  }
+  ctx.restore();
+}
+
+// ── Step 3: Search ──
+const LIT_ORDER = [0, 1, 2, 3, 4]; // Schiacce, Montino, Dove mangiare, Pisa bambini, Guida gastronomica
+const LIT_SIZES = [8, 7, 7, 6, 6];
+const LIT_NAMES = ['Schiacce', 'Montino', 'Dove mangiare', 'Pisa bambini', 'Guida gastr.'];
+
+function drawSearchContent(rect, progress) {
+  // progress: 0-0.15 query enters, 0.15-0.7 radar, 0.7-1.0 BM25 panel
+  const cx = rect.x + rect.w * 0.45;
+  const cy = rect.y + rect.h * 0.5;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rect.x + 2, rect.y + 2, rect.w - 4, rect.h - 4);
+  ctx.clip();
+
+  // Draw all dots
+  for (let i = 0; i < dotPositions.length; i++) {
+    const d = dotPositions[i];
+    const r = d.litSize || 5;
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, s(r / 2), 0, Math.PI * 2);
+    ctx.fillStyle = d.lit ? hexToRgba(C.orange, d.litAlpha) : hexToRgba(C.beige, 0.6);
+    ctx.fill();
+
+    if (d.labelAlpha > 0.01) {
+      ctx.globalAlpha = d.labelAlpha;
+      const lf = s(8);
+      ctx.font = `${d.lit && LIT_ORDER.indexOf(i) < 3 ? '700' : '400'} ${lf}px Inter`;
+      ctx.fillStyle = C.dark;
+      ctx.textAlign = 'center';
+      ctx.fillText(d.name, d.x, d.y - s(r / 2) - s(4));
+      ctx.textAlign = 'left';
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Query point entering
+  if (progress > 0) {
+    const enterT = clamp01(progress / 0.15);
+    const qx = rect.x + s(10) + (cx - rect.x - s(10)) * easeOutCubic(enterT);
+    queryPointX = qx;
+    const pulse = 1 + Math.sin(now / 300) * 0.1;
+    ctx.beginPath();
+    ctx.arc(qx, cy, s(6) * pulse, 0, Math.PI * 2);
+    ctx.fillStyle = C.orange;
+    ctx.fill();
+    // Glow
+    const grad = ctx.createRadialGradient(qx, cy, 0, qx, cy, s(20));
+    grad.addColorStop(0, hexToRgba(C.orange, 0.25));
+    grad.addColorStop(1, hexToRgba(C.orange, 0));
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(qx, cy, s(20), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Radar effect
+  if (progress > 0.15) {
+    const radarT = (progress - 0.15) / 0.55;
+    for (let ring = 0; ring < 3; ring++) {
+      const ringStart = ring * 0.15;
+      const ringT = clamp01((radarT - ringStart) / 0.6);
+      if (ringT <= 0) continue;
+      const maxR = Math.min(rect.w, rect.h) * 0.42;
+      const ringRadius = ringT * maxR;
+      const alpha = (1 - ringT) * [0.25, 0.18, 0.1][ring];
+      ctx.beginPath();
+      ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = hexToRgba(C.purple, alpha);
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Light up dots as radar passes
+      for (let di = 0; di < LIT_ORDER.length; di++) {
+        const dot = dotPositions[LIT_ORDER[di]];
+        const dist = Math.sqrt((dot.x - cx) ** 2 + (dot.y - cy) ** 2);
+        if (dist < ringRadius && ring === 0 && !dot.lit) {
+          dot.lit = true;
+          dot.litSize = LIT_SIZES[di];
+          dot.litAlpha = di < 3 ? 1 : 0.7;
+          dot.labelAlpha = 1;
+        }
+      }
+    }
+  }
+
+  // BM25 panel
+  if (progress > 0.7) {
+    const bAlpha = easeOutCubic(clamp01((progress - 0.7) / 0.2));
+    ctx.globalAlpha = bAlpha;
+    const panelW = rect.w * 0.42;
+    const panelH = s(42);
+    const panelX = rect.x + rect.w - panelW - s(8);
+    const panelY = rect.y + rect.h - panelH - s(10);
+
+    roundRect(panelX, panelY, panelW, panelH, s(6));
+    ctx.fillStyle = C.white;
+    ctx.fill();
+    ctx.strokeStyle = C.blue;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    const tf = s(9);
+    ctx.font = `700 ${tf}px Inter`;
+    ctx.fillStyle = C.blue;
+    ctx.textAlign = 'left';
+    ctx.fillText('BM25 keywords:', panelX + s(6), panelY + s(16));
+
+    ctx.font = `400 ${tf}px Inter`;
+    ctx.fillStyle = C.dark;
+    ctx.fillText('schiacce \u2713  focaccia \u2717', panelX + s(6), panelY + s(30));
+
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.restore();
+}
+
+// ── Step 4: Rerank ──
+const RERANK_INITIAL = [
+  { name: 'Schiacce', score: 0.89 },
+  { name: 'Montino', score: 0.82 },
+  { name: 'Dove mangiare', score: 0.79 },
+  { name: 'Pisa bambini', score: 0.71 },
+  { name: 'Guida gastr.', score: 0.68 }
+];
+const RERANK_FINAL = [
+  { name: 'Schiacce', score: 0.95 },
+  { name: 'Montino', score: 0.91 },
+  { name: 'Dove mangiare', score: 0.88 },
+  { name: 'Guida gastr.', score: 0.72 },
+  { name: 'Pisa bambini', score: 0.65 }
+];
+
+function initRerankItems() {
+  const rect = stageRects[3];
+  const startY = rect.y + s(70);
+  const itemH = s(26);
+  const gap = s(6);
+  rerankItems = RERANK_INITIAL.map((item, i) => ({
+    name: item.name,
+    score: item.score,
+    targetScore: RERANK_FINAL.find(f => f.name === item.name).score,
+    currentY: startY + i * (itemH + gap),
+    targetY: startY + i * (itemH + gap), // will be updated
+    itemH,
+    alpha: 1
+  }));
+}
+
+function drawRerankContent(rect, progress) {
+  // progress: 0-0.3 items appear, 0.3-0.8 sort animation, 0.8-1.0 highlight top 3
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rect.x + 2, rect.y + 2, rect.w - 4, rect.h - 4);
+  ctx.clip();
+
+  const itemH = s(26);
+  const gap = s(6);
+  const startY = rect.y + s(70);
+  const itemW = rect.w - s(20);
+  const itemX = rect.x + s(10);
+
+  // Cohere label
+  if (progress > 0.05) {
+    const la = clamp01((progress - 0.05) / 0.15);
+    ctx.globalAlpha = la;
+    const lf = s(10);
+    ctx.font = `700 ${lf}px Inter`;
+    ctx.fillStyle = C.green;
+    ctx.textAlign = 'center';
+    ctx.fillText('Cohere Rerank', rect.x + rect.w / 2, rect.y + s(58));
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+
+  // Compute final positions
+  const finalOrder = ['Schiacce', 'Montino', 'Dove mangiare', 'Guida gastr.', 'Pisa bambini'];
+  for (const item of rerankItems) {
+    const finalIdx = finalOrder.indexOf(item.name);
+    item.targetY = startY + finalIdx * (itemH + gap);
+  }
+
+  // Sort animation
+  const sortT = progress < 0.3 ? 0 : easeInOutCubic(clamp01((progress - 0.3) / 0.5));
+
+  for (const item of rerankItems) {
+    const initIdx = RERANK_INITIAL.findIndex(r => r.name === item.name);
+    const initY = startY + initIdx * (itemH + gap);
+    const y = initY + (item.targetY - initY) * sortT;
+    const score = item.score + (item.targetScore - item.score) * sortT;
+
+    const appearAlpha = clamp01(progress / 0.2);
+    ctx.globalAlpha = appearAlpha;
+
+    // Card background
+    roundRect(itemX, y, itemW, itemH, s(5));
+    ctx.fillStyle = C.white;
+    ctx.fill();
+
+    // Green left border for top 3 after sort
+    const finalIdx = finalOrder.indexOf(item.name);
+    if (progress > 0.8 && finalIdx < 3) {
+      ctx.fillStyle = C.green;
+      ctx.fillRect(itemX, y + s(2), 3, itemH - s(4));
+    }
+
+    // Dim bottom 2 after sort
+    if (progress > 0.8 && finalIdx >= 3) {
+      ctx.globalAlpha = 0.5 * appearAlpha;
+    }
+
+    ctx.strokeStyle = hexToRgba(C.beige, 0.8);
+    ctx.lineWidth = 1;
+    roundRect(itemX, y, itemW, itemH, s(5));
+    ctx.stroke();
+
+    // Name
+    const nf = s(10);
+    ctx.font = `600 ${nf}px Inter`;
+    ctx.fillStyle = C.dark;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(item.name, itemX + s(8), y + itemH / 2);
+
+    // Score badge
+    const scoreText = score.toFixed(2);
+    const badgeW = s(36);
+    const badgeH = s(18);
+    const badgeX = itemX + itemW - badgeW - s(6);
+    const badgeY = y + (itemH - badgeH) / 2;
+    roundRect(badgeX, badgeY, badgeW, badgeH, s(4));
+    ctx.fillStyle = hexToRgba(C.green, 0.12);
+    ctx.fill();
+    ctx.font = `700 ${s(9)}px Inter`;
+    ctx.fillStyle = C.green;
+    ctx.textAlign = 'center';
+    ctx.fillText(scoreText, badgeX + badgeW / 2, badgeY + badgeH / 2);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+// ── Step 5: Prompt building ──
+function drawPromptContent(rect, progress) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rect.x + 2, rect.y + 2, rect.w - 4, rect.h - 4);
+  ctx.clip();
+
+  const innerX = rect.x + s(8);
+  const innerW = rect.w - s(16);
+  const topY = rect.y + s(58);
+
+  // Contesto box
+  const ctxBoxH = s(70);
+  const ctxAlpha = easeOutCubic(clamp01(progress / 0.3));
+  if (ctxAlpha > 0.01) {
+    ctx.globalAlpha = ctxAlpha;
+    roundRect(innerX, topY, innerW, ctxBoxH, s(5));
+    ctx.fillStyle = hexToRgba(C.blue, 0.05);
+    ctx.fill();
+    ctx.strokeStyle = C.blue;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    const lf = s(9);
+    ctx.font = `700 ${lf}px Inter`;
+    ctx.fillStyle = C.blue;
+    ctx.fillText('CONTESTO', innerX + s(6), topY + s(14));
+
+    ctx.font = `400 ${s(8)}px Inter`;
+    ctx.fillStyle = C.gray;
+    const snippets = ['Le migliori schiacce...', 'Il Montino dal 1927...', 'Dove mangiare a Pisa...'];
+    for (let i = 0; i < snippets.length; i++) {
+      ctx.fillText(snippets[i], innerX + s(6), topY + s(28) + i * s(14));
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Plus sign
+  const plusY = topY + ctxBoxH + s(4);
+  const plusAlpha = easeOutCubic(clamp01((progress - 0.25) / 0.15));
+  if (plusAlpha > 0.01) {
+    ctx.globalAlpha = plusAlpha;
+    ctx.font = `700 ${s(16)}px Inter`;
+    ctx.fillStyle = C.gray;
+    ctx.textAlign = 'center';
+    ctx.fillText('+', rect.x + rect.w / 2, plusY + s(10));
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+
+  // Domanda box
+  const qBoxY = plusY + s(18);
+  const qBoxH = s(36);
+  const qAlpha = easeOutCubic(clamp01((progress - 0.35) / 0.25));
+  if (qAlpha > 0.01) {
+    ctx.globalAlpha = qAlpha;
+    roundRect(innerX, qBoxY, innerW, qBoxH, s(5));
+    ctx.fillStyle = hexToRgba(C.orange, 0.05);
+    ctx.fill();
+    ctx.strokeStyle = C.orange;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.font = `700 ${s(9)}px Inter`;
+    ctx.fillStyle = C.orange;
+    ctx.fillText('DOMANDA', innerX + s(6), qBoxY + s(14));
+
+    ctx.font = `400 ${s(8)}px Inter`;
+    ctx.fillStyle = C.dark;
+    ctx.fillText('Dove mangio una buona...', innerX + s(6), qBoxY + s(26));
+    ctx.globalAlpha = 1;
+  }
+
+  // Equals sign
+  const eqY = qBoxY + qBoxH + s(4);
+  const eqAlpha = easeOutCubic(clamp01((progress - 0.55) / 0.15));
+  if (eqAlpha > 0.01) {
+    ctx.globalAlpha = eqAlpha;
+    ctx.font = `700 ${s(16)}px Inter`;
+    ctx.fillStyle = C.gray;
+    ctx.textAlign = 'center';
+    ctx.fillText('=', rect.x + rect.w / 2, eqY + s(10));
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+
+  // Prompt encompassing box
+  const promptY = eqY + s(18);
+  const promptH = s(32);
+  const pAlpha = easeOutCubic(clamp01((progress - 0.65) / 0.2));
+  if (pAlpha > 0.01) {
+    ctx.globalAlpha = pAlpha;
+    roundRect(innerX, promptY, innerW, promptH, s(5));
+    ctx.fillStyle = hexToRgba(C.green, 0.05);
+    ctx.fill();
+    ctx.strokeStyle = C.green;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.font = `700 ${s(10)}px Inter`;
+    ctx.fillStyle = C.green;
+    ctx.textAlign = 'center';
+    ctx.fillText('PROMPT COMPLETO', rect.x + rect.w / 2, promptY + s(19));
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+
+  // System note
+  const noteAlpha = easeOutCubic(clamp01((progress - 0.8) / 0.2));
+  if (noteAlpha > 0.01) {
+    ctx.globalAlpha = noteAlpha;
+    ctx.font = `italic 400 ${s(8)}px Inter`;
+    ctx.fillStyle = C.lightGray;
+    const noteY = promptY + promptH + s(12);
+    ctx.fillText('Sistema: Sei una guida', innerX + s(4), noteY);
+    ctx.fillText('turistica di Pisa...', innerX + s(4), noteY + s(11));
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+// ── Step 6: Response ──
+const RESPONSE_LINES = [
+  { text: 'A Pisa la chiamiamo schiacciata!', font: '700', size: 14, color: C.dark },
+  { text: '\uD83C\uDFC6 Il Montino \u2014 schiacciata + cecina da 60 anni', font: '400', size: 12, color: C.dark },
+  { text: '\uD83E\uDD48 Forno Porta a Lucca', font: '400', size: 12, color: C.dark },
+  { text: '\uD83E\uDD49 I Porci Comodi', font: '400', size: 12, color: C.dark },
+  { text: '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500', font: '400', size: 9, color: C.beige },
+  { text: '\uD83D\uDCD6 Fonti: Le migliori schiacce, Il Montino', font: '400', size: 11, color: C.gray }
+];
+
+function drawThinkingDots(rect) {
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h * 0.55;
+  for (let i = 0; i < 3; i++) {
+    const phase = now / 300 + i * 0.8;
+    const bounce = Math.abs(Math.sin(phase)) * s(8);
+    ctx.beginPath();
+    ctx.arc(cx + (i - 1) * s(16), cy - bounce, s(5), 0, Math.PI * 2);
+    ctx.fillStyle = hexToRgba(C.orange, 0.6 + Math.abs(Math.sin(phase)) * 0.4);
+    ctx.fill();
+  }
+}
+
+function drawResponseTypewriter(rect, lineIdx, charInLine) {
+  const innerX = rect.x + s(10);
+  const maxTextW = rect.w - s(20);
+  const startY = rect.y + s(69);
+  let y = startY;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rect.x + 2, rect.y + 2, rect.w - 4, rect.h - 4);
+  ctx.clip();
+
+  for (let li = 0; li <= lineIdx && li < RESPONSE_LINES.length; li++) {
+    const line = RESPONSE_LINES[li];
+    const fontSize = s(line.size);
+    const lineH = fontSize * 1.8;
+    ctx.font = `${line.font} ${fontSize}px Inter`;
+    ctx.fillStyle = line.color;
+    ctx.textBaseline = 'middle';
+
+    const maxChars = li < lineIdx ? line.text.length : charInLine;
+    const text = line.text.substring(0, maxChars);
+    ctx.fillText(text, innerX, y);
+
+    // Cursor on current line
+    if (li === lineIdx && charInLine < line.text.length) {
+      const tw = Math.min(ctx.measureText(text).width, maxTextW);
+      const blinkOn = Math.floor(now / 350) % 2 === 0;
+      if (blinkOn) {
+        ctx.fillStyle = C.green;
+        ctx.fillRect(innerX + tw + 2, y - fontSize * 0.35, 2, fontSize * 0.7);
+      }
+    }
+
+    y += lineH;
+  }
+  ctx.restore();
+  ctx.textBaseline = 'alphabetic';
+}
+
+// ── Step 7: Final glow ──
+function drawFinalBanner(alpha) {
+  if (alpha < 0.01) return;
+  ctx.globalAlpha = alpha;
+
+  const bannerW = s(400);
+  const bannerH = s(40);
+  const bx = (W - bannerW) / 2;
+  const by = stageRects[0].y + stageRects[0].h + s(30);
+
+  // Shadow
+  ctx.save();
+  ctx.shadowColor = hexToRgba(C.dark, 0.08);
+  ctx.shadowBlur = s(8);
+  ctx.shadowOffsetY = s(2);
+  roundRect(bx, by, bannerW, bannerH, s(8));
+  ctx.fillStyle = C.white;
+  ctx.fill();
+  ctx.restore();
+
+  // Green left border
+  ctx.fillStyle = C.green;
+  roundRect(bx, by, 4, bannerH, s(2));
+  ctx.fill();
+
+  // Text
+  const tf = s(13);
+  ctx.font = `700 ${tf}px Inter`;
+  ctx.fillStyle = C.dark;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Risponde SOLO dal contesto \u2014 nessuna allucinazione', bx + bannerW / 2, by + bannerH / 2);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+
+  ctx.globalAlpha = 1;
+}
+
+function drawGradientBar(alpha) {
+  if (alpha < 0.01) return;
+  ctx.globalAlpha = alpha;
+  const barH = 4;
+  const startX = stageRects[0].x;
+  const endX = stageRects[5].x + stageRects[5].w;
+  const barY = stageRects[0].y + stageRects[0].h + s(12);
+  const grad = ctx.createLinearGradient(startX, 0, endX, 0);
+  grad.addColorStop(0, C.orange);
+  grad.addColorStop(1, C.green);
+  ctx.fillStyle = grad;
+  roundRect(startX, barY, endX - startX, barH, 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+// ── Step management ──
+function getActiveStages(step) {
+  switch (step) {
+    case 0: return [];
+    case 1: return [0];
+    case 2: return [0, 1];
+    case 3: return [0, 1, 2];
+    case 4: return [0, 1, 2, 3];
+    case 5: return [0, 1, 2, 3, 4];
+    case 6: return [0, 1, 2, 3, 4, 5];
+    case 7: return [0, 1, 2, 3, 4, 5];
+    default: return [];
+  }
+}
+
+function getActiveArrowIndices(step) {
+  switch (step) {
+    case 0: return [];
+    case 1: return [];
+    case 2: return [0];
+    case 3: return [0, 1];
+    case 4: return [0, 1, 2];
+    case 5: return [0, 1, 2, 3];
+    case 6: return [0, 1, 2, 3, 4];
+    case 7: return [0, 1, 2, 3, 4];
+    default: return [];
+  }
+}
+
+// ── Animation timing ──
+const STEP_DURATIONS = [0, 2500, 2500, 3500, 2000, 2000, 4000, 2000];
+
+function stepProgress() {
+  if (currentStep === 0 || !animating) return 1;
+  const elapsed = now - animStartTime;
+  const duration = STEP_DURATIONS[currentStep];
+  return clamp01(elapsed / duration);
+}
+
+function isStepComplete() {
+  if (currentStep === 0) return true;
+  if (!animating) return true;
+  return stepProgress() >= 1;
+}
+
+function startStep(step) {
+  currentStep = step;
+  animating = true;
+  animStartTime = now;
+  arrowParticles = [];
+  activeArrows = new Set(getActiveArrowIndices(step));
+
+  // Update UI
+  document.getElementById('step-num').textContent = `Passo ${step} di 7`;
+  document.getElementById('step-title').textContent = STEP_TITLES[step];
+
+  // Reset step-specific state
+  if (step === 1) {
+    typewriterChars = 0;
+  }
+  if (step === 3) {
+    initDotPositions();
+  }
+  if (step === 4) {
+    initRerankItems();
+  }
+  if (step === 6) {
+    responseLineIndex = 0;
+    responseCharInLine = 0;
+    lastResponseCharTime = 0;
+    lastResponseLineTime = 0;
+  }
+  if (step === 7) {
+    finalGlowProgress = 0;
+    bannerAlpha = 0;
+  }
+}
+
+// ── Main draw ──
+function draw(timestamp) {
+  now = timestamp;
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  if (stageRects.length === 0) { requestAnimationFrame(draw); return; }
+
+  const progress = stepProgress();
+  const actives = getActiveStages(currentStep);
+  const activeArrowIdx = getActiveArrowIndices(currentStep);
+
+  // Check if animation complete
+  if (animating && progress >= 1) {
+    animating = false;
+  }
+
+  // ── Draw arrows ──
+  for (let i = 0; i < arrowSegs.length; i++) {
+    const isActive = activeArrowIdx.includes(i);
+    const color = currentStep === 7 ? C.green : (isActive ? STAGES[i + 1].color : undefined);
+    drawArrow(i, isActive, color);
+  }
+
+  // Update active arrows for particles
+  if (animating || currentStep === 7) {
+    activeArrows = new Set(activeArrowIdx);
+  } else {
+    activeArrows = new Set(activeArrowIdx);
+  }
+  maybeSpawnParticles();
+  updateAndDrawArrowParticles();
+
+  // ── Draw stages ──
+  for (let i = 0; i < STAGES.length; i++) {
+    const isActive = actives.includes(i);
+    const glowColor = currentStep === 7 ? C.green : undefined;
+    drawStage(i, isActive, glowColor);
+  }
+
+  // ── Step-specific content ──
+
+  // Step 0: blinking cursor
+  if (currentStep === 0) {
+    const r = stageRects[0];
+    const blinkOn = Math.floor(now / 500) % 2 === 0;
+    if (blinkOn) {
+      const cx = r.x + r.w / 2 - s(1);
+      const cy = r.y + r.h / 2;
+      ctx.fillStyle = C.orange;
+      ctx.fillRect(cx, cy - s(10), 2, s(20));
+    }
+  }
+
+  // Step 1: typewriter
+  if (currentStep >= 1) {
+    if (currentStep === 1 && animating) {
+      const chars = Math.floor(progress * QUESTION.length * 1.1);
+      typewriterChars = Math.min(chars, QUESTION.length);
+      const showCursor = typewriterChars < QUESTION.length || progress < 0.95;
+      drawTypewriter(stageRects[0], typewriterChars, showCursor);
+    } else if (currentStep >= 1) {
+      drawTypewriter(stageRects[0], QUESTION.length, false);
+    }
+  }
+
+  // Step 2: embedding
+  if (currentStep >= 2) {
+    if (currentStep === 2 && animating) {
+      drawEmbeddingContent(stageRects[1], progress);
+    } else if (currentStep >= 2) {
+      drawEmbeddingContent(stageRects[1], 1.0);
+    }
+  }
+
+  // Step 3: search
+  if (currentStep >= 3) {
+    if (currentStep === 3 && animating) {
+      drawSearchContent(stageRects[2], progress);
+    } else if (currentStep >= 3) {
+      drawSearchContent(stageRects[2], 1.0);
+    }
+  }
+
+  // Step 4: rerank
+  if (currentStep >= 4) {
+    if (currentStep === 4 && animating) {
+      drawRerankContent(stageRects[3], progress);
+    } else if (currentStep >= 4) {
+      drawRerankContent(stageRects[3], 1.0);
+    }
+  }
+
+  // Step 5: prompt
+  if (currentStep >= 5) {
+    if (currentStep === 5 && animating) {
+      drawPromptContent(stageRects[4], progress);
+    } else if (currentStep >= 5) {
+      drawPromptContent(stageRects[4], 1.0);
+    }
+  }
+
+  // Step 6: LLM thinking + response
+  if (currentStep >= 6) {
+    if (currentStep === 6 && animating) {
+      if (progress < 0.35) {
+        // Thinking dots in LLM stage
+        drawThinkingDots(stageRects[4]);
+        // Pulsing border
+        const pulseAlpha = 0.5 + Math.sin(now / 200) * 0.3;
+        const r4 = stageRects[4];
+        roundRect(r4.x, r4.y, r4.w, r4.h, s(16));
+        ctx.strokeStyle = hexToRgba(C.orange, pulseAlpha);
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      } else {
+        // Response typewriter
+        const respProgress = (progress - 0.35) / 0.65;
+        // Advance typewriter
+        if (now - lastResponseCharTime > 30 && responseLineIndex < RESPONSE_LINES.length) {
+          lastResponseCharTime = now;
+          const currentLine = RESPONSE_LINES[responseLineIndex];
+          if (responseCharInLine < currentLine.text.length) {
+            responseCharInLine++;
+          } else {
+            // Move to next line after pause
+            if (now - lastResponseLineTime > 300 || lastResponseLineTime === 0) {
+              if (lastResponseLineTime === 0) {
+                lastResponseLineTime = now;
+              } else {
+                responseLineIndex++;
+                responseCharInLine = 0;
+                lastResponseLineTime = 0;
+              }
+            }
+          }
+        }
+        drawResponseTypewriter(stageRects[5], responseLineIndex, responseCharInLine);
+      }
+    } else if (currentStep >= 6) {
+      // Show complete response
+      drawResponseTypewriter(stageRects[5], RESPONSE_LINES.length - 1, RESPONSE_LINES[RESPONSE_LINES.length - 1].text.length);
+    }
+  }
+
+  // Step 7: final glow
+  if (currentStep === 7) {
+    if (animating) {
+      finalGlowProgress = progress;
+      bannerAlpha = easeOutCubic(clamp01((progress - 0.3) / 0.5));
+    } else {
+      finalGlowProgress = 1;
+      bannerAlpha = 1;
+    }
+    drawGradientBar(easeOutCubic(clamp01(finalGlowProgress / 0.4)));
+    drawFinalBanner(bannerAlpha);
+  }
+
+  requestAnimationFrame(draw);
+}
+
+// ── Keyboard input ──
+function advance() {
+  if (animating) {
+    // Skip to end of current step
+    animating = false;
+    return;
+  }
+  if (currentStep < 7) {
+    startStep(currentStep + 1);
+  }
+}
+
+function goBack() {
+  if (animating) {
+    animating = false;
+    return;
+  }
+  if (currentStep > 0) {
+    const target = currentStep - 1;
+    arrowParticles = [];
+    currentStep = target;
+    animating = false;
+    activeArrows = new Set(getActiveArrowIndices(target));
+    document.getElementById('step-num').textContent = `Passo ${target} di 7`;
+    document.getElementById('step-title').textContent = STEP_TITLES[target];
+
+    // Re-init dot positions with lit state for step 3+
+    initDotPositions();
+    if (target >= 3) {
+      // Light up the 5 relevant dots as if search completed
+      for (let di = 0; di < LIT_ORDER.length; di++) {
+        const dot = dotPositions[LIT_ORDER[di]];
+        dot.lit = true;
+        dot.litSize = LIT_SIZES[di];
+        dot.litAlpha = di < 3 ? 1 : 0.7;
+        dot.labelAlpha = 1;
+      }
+    }
+    if (target >= 4) {
+      initRerankItems();
+    }
+  }
+}
+
+function reset() {
+  arrowParticles = [];
+  activeArrows = new Set();
+  currentStep = 0;
+  animating = false;
+  initDotPositions();
+  initRerankItems();
+  responseLineIndex = 0;
+  responseCharInLine = 0;
+  finalGlowProgress = 0;
+  bannerAlpha = 0;
+  document.getElementById('step-num').textContent = 'Passo 0 di 7';
+  document.getElementById('step-title').textContent = STEP_TITLES[0];
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === ' ' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    advance();
+  } else if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    goBack();
+  } else if (e.key === 'r' || e.key === 'R') {
+    e.preventDefault();
+    reset();
+  }
+});
+
+// ── Init ──
+window.addEventListener('resize', resize);
+
+document.fonts.ready.then(function() {
+  resize();
+  initDotPositions();
+  initRerankItems();
+  requestAnimationFrame(draw);
+
+  // Toast
+  const toast = document.getElementById('toast');
+  toast.classList.add('show');
+  setTimeout(function() { toast.classList.remove('show'); }, 3000);
+});
+
+})();
+</script>
+</body>
+</html>

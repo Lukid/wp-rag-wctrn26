@@ -1,0 +1,1208 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3. Spazio Embedding — WordCamp Torino 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100vw; height: 100vh; overflow: hidden;
+    font-family: 'Inter', sans-serif;
+    background: #F5EDE3;
+  }
+  #top-bar {
+    height: 48px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; background: #fff; border-bottom: 2px solid #E8DDD0;
+    position: relative; z-index: 10;
+  }
+  #top-bar .title { font-weight: 700; font-size: 16px; color: #1D1D1B; }
+  #top-bar .event { font-weight: 400; font-size: 13px; color: #9CA3AF; }
+  #canvas-wrap {
+    position: relative; width: 100%; height: calc(100vh - 96px);
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+  #bottom-bar {
+    height: 48px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; background: #1D1D1B; position: relative; z-index: 10;
+  }
+  #bottom-bar .step-num { font-weight: 600; font-size: 14px; color: #fff; }
+  #bottom-bar .step-title { font-weight: 600; font-size: 14px; color: #E8643C;
+    position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; }
+  #bottom-bar .controls { font-weight: 400; font-size: 12px; color: #9CA3AF; }
+  #toast {
+    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+    background: rgba(29,29,27,0.88); color: #fff; padding: 10px 24px;
+    border-radius: 8px; font-size: 13px; font-weight: 600;
+    opacity: 0; transition: opacity 0.5s; z-index: 100; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="top-bar">
+  <span class="title">Spazio Embedding</span>
+  <span class="event">WordCamp Torino 2026</span>
+</div>
+<div id="canvas-wrap">
+  <canvas id="c"></canvas>
+</div>
+<div id="bottom-bar">
+  <span class="step-num" id="step-num">Passo 0 di 5</span>
+  <span class="step-title" id="step-title">Le parole come le conosciamo</span>
+  <span class="controls">SPAZIO = avanti | &larr; = indietro | R = reset</span>
+</div>
+<div id="toast">Premi F11 per lo schermo intero</div>
+
+<script>
+(function() {
+"use strict";
+
+// ── Constants ──
+const COLORS = {
+  bg: '#F5EDE3', orange: '#E8643C', dark: '#1D1D1B', blue: '#2563EB',
+  green: '#16A34A', purple: '#7C3AED', gray: '#9CA3AF', red: '#DC2626'
+};
+
+const STEP_TITLES = [
+  'Le parole come le conosciamo',
+  'Per un computer sono solo stringhe',
+  "L'embedding assegna coordinate",
+  'Significati simili = coordinate vicine',
+  'Ecco perch\u00e9 la ricerca semantica funziona',
+  "L'embedding cattura il significato"
+];
+
+// Reference canvas size for proportional scaling
+const REF_W = 1100, REF_H = 580;
+
+// ── Data ──
+const GROUPS = {
+  CIBO:     { color: COLORS.orange, label: 'CIBO' },
+  LUOGHI:   { color: COLORS.blue,   label: 'LUOGHI' },
+  ATTIVITA: { color: COLORS.purple, label: 'ATTIVIT\u00c0' },
+  OUTLIER:  { color: COLORS.gray,   label: 'OUTLIER' }
+};
+
+const DATA = [
+  { label: 'schiacciata pisana', icon: '\uD83C\uDF55', tx: 220, ty: 180, group: 'CIBO' },
+  { label: 'focaccia',           icon: '\uD83E\uDD56', tx: 280, ty: 250, group: 'CIBO' },
+  { label: 'cec\u00ecna',       icon: '\uD83E\uDED3', tx: 180, ty: 280, group: 'CIBO' },
+  { label: 'dove mangiare',      icon: '\uD83C\uDF7D\uFE0F', tx: 310, ty: 190, group: 'CIBO' },
+  { label: 'trattoria',          icon: '\uD83C\uDF5D', tx: 250, ty: 320, group: 'CIBO' },
+
+  { label: 'Torre Pendente',       icon: '\uD83C\uDFDB\uFE0F', tx: 750, ty: 160, group: 'LUOGHI' },
+  { label: 'Piazza dei Miracoli',  icon: '\u26EA',             tx: 830, ty: 220, group: 'LUOGHI' },
+  { label: 'Keith Haring',         icon: '\uD83C\uDFA8',       tx: 700, ty: 250, group: 'LUOGHI' },
+  { label: 'Orto Botanico',        icon: '\uD83C\uDF3F',       tx: 810, ty: 300, group: 'LUOGHI' },
+  { label: 'S. Maria della Spina', icon: '\uD83C\uDFF0',       tx: 760, ty: 340, group: 'LUOGHI' },
+
+  { label: 'Gioco del Ponte',      icon: '\u2694\uFE0F', tx: 500, ty: 140, group: 'ATTIVITA' },
+  { label: 'Pisa di notte',        icon: '\uD83C\uDF19',  tx: 560, ty: 200, group: 'ATTIVITA' },
+  { label: 'itinerario un giorno', icon: '\uD83D\uDDFA\uFE0F', tx: 480, ty: 240, group: 'ATTIVITA' },
+
+  { label: 'debugging PHP',        icon: '\uD83D\uDC1B', tx: 900, ty: 500, group: 'OUTLIER' }
+];
+
+// Fake vectors for Step 2
+const FAKE_VECTORS = [
+  '[0.23, -0.87, 0.41, ...]', '[0.19, -0.82, 0.39, ...]', '[0.25, -0.79, 0.44, ...]',
+  '[0.21, -0.84, 0.37, ...]', '[0.18, -0.81, 0.42, ...]', '[-0.65, 0.33, 0.71, ...]',
+  '[-0.61, 0.38, 0.68, ...]', '[-0.58, 0.29, 0.74, ...]', '[-0.63, 0.35, 0.69, ...]',
+  '[-0.60, 0.31, 0.72, ...]', '[0.02, 0.55, -0.28, ...]', '[0.05, 0.51, -0.31, ...]',
+  '[0.01, 0.58, -0.25, ...]', '[0.88, 0.12, -0.93, ...]'
+];
+
+// ── Canvas & State ──
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, dpr;
+let currentStep = 0;
+let animating = false;
+let startTime = 0;
+let animFrame = 0;
+
+// Chip state
+let chips = [];
+let gridOpacity = 0;
+let coordBadgeOpacity = 0;
+let axisLabelOpacity = 0;
+let noteOpacity = 0;
+let clusterEllipseOpacity = 0;
+let groupLabelOpacity = 0;
+let attractionLineOpacity = 0;
+
+// Step 4 state
+let queryChip = null;
+let queryVisible = 0;
+let dottedLineProgress = 0;
+let queryAtTarget = false;
+let radarTime = 0;
+let radarActive = false;
+let highlightOpacity = [0, 0, 0]; // schiacciata, cecina, dove mangiare
+let dimOthers = 0;
+let outlierBadgeOpacity = 0;
+let nearBadgeOpacity = 0;
+
+// Step 5 state
+let zoomScale = 1;
+let legendOpacity = 0;
+let finalMsgOpacity = 0;
+let queryFadeOut = 0;
+
+// Floating state (Step 1)
+let floating = false;
+
+function initCanvas() {
+  dpr = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  W = rect.width;
+  H = rect.height;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function scaleX(v) { return (v / REF_W) * W; }
+function scaleY(v) { return (v / REF_H) * H; }
+
+function initChips() {
+  chips = DATA.map(function(d, i) {
+    var listX = 60;
+    var listY = 40 + i * ((H - 80) / (DATA.length - 1));
+    return {
+      x: listX, y: listY,
+      targetX: listX, targetY: listY,
+      startX: listX, startY: listY,
+      vx: 0, vy: 0,
+      label: d.label, icon: d.icon, group: d.group,
+      clusterTX: scaleX(d.tx), clusterTY: scaleY(d.ty),
+      opacity: 0,
+      vector: FAKE_VECTORS[i],
+      glowing: false
+    };
+  });
+}
+
+// ── Drawing helpers ──
+
+function measureChip(label) {
+  ctx.font = '600 16px Inter';
+  var tw = ctx.measureText(label).width;
+  return 16 + 24 + tw + 14; // padding-left + icon space + text + padding-right
+}
+
+function drawChip(chip, extraStyles) {
+  extraStyles = extraStyles || {};
+  var w = measureChip(chip.label);
+  var h = 38;
+  var x = chip.x - w / 2;
+  var y = chip.y - h / 2;
+  var r = 19;
+  var groupColor = GROUPS[chip.group].color;
+  var opacity = extraStyles.opacity !== undefined ? extraStyles.opacity : chip.opacity;
+  if (opacity <= 0) return;
+
+  ctx.save();
+  ctx.globalAlpha = opacity;
+
+  // Glow
+  if (chip.glowing || extraStyles.glow) {
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = groupColor + '4D'; // 0.3 alpha
+  }
+
+  // Extra glow for highlight
+  if (extraStyles.highlightGlow) {
+    ctx.shadowBlur = extraStyles.highlightGlow;
+    ctx.shadowColor = extraStyles.highlightColor || groupColor + '80';
+  }
+
+  // Pulsing border (for query chip)
+  if (extraStyles.pulsingBorder) {
+    var pulseAlpha = 0.4 + 0.6 * Math.abs(Math.sin(performance.now() / 400));
+    ctx.shadowBlur = 8 + 6 * pulseAlpha;
+    ctx.shadowColor = COLORS.orange;
+  }
+
+  // Body
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+  ctx.fillStyle = '#fff';
+  ctx.fill();
+
+  // Border
+  if (extraStyles.pulsingBorder) {
+    var pulseAlpha2 = 0.5 + 0.5 * Math.abs(Math.sin(performance.now() / 400));
+    ctx.strokeStyle = COLORS.orange;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = opacity * pulseAlpha2;
+    ctx.stroke();
+    ctx.globalAlpha = opacity;
+  }
+
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = 'transparent';
+
+  // Subtle shadow (non-glow)
+  if (!chip.glowing && !extraStyles.glow && !extraStyles.pulsingBorder) {
+    ctx.save();
+    ctx.globalAlpha = opacity * 0.08;
+    ctx.shadowBlur = 6;
+    ctx.shadowColor = '#000';
+    ctx.shadowOffsetY = 2;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+    ctx.fill();
+    ctx.restore();
+    ctx.globalAlpha = opacity;
+  }
+
+  // Icon
+  ctx.font = '19px sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#000';
+  ctx.fillText(chip.icon, x + 10, y + h / 2 + 1);
+
+  // Label
+  ctx.font = '600 16px Inter';
+  ctx.fillStyle = groupColor;
+  ctx.fillText(chip.label, x + 38, y + h / 2 + 1);
+
+  ctx.restore();
+}
+
+function drawGrid(opacity) {
+  if (opacity <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.strokeStyle = '#1D1D1B';
+  ctx.lineWidth = 0.5;
+  var spacing = 50;
+  for (var gx = 0; gx < W; gx += spacing) {
+    ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
+  }
+  for (var gy = 0; gy < H; gy += spacing) {
+    ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawCoordBadge(chip, opacity) {
+  if (opacity <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.font = '400 12px Inter';
+  ctx.fillStyle = COLORS.gray;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText(chip.vector, chip.x, chip.y + 24);
+  ctx.restore();
+}
+
+function drawAxisLabels(opacity) {
+  if (opacity <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.font = 'italic 13px Inter';
+  ctx.fillStyle = '#ccc';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('dimensione 1 \u2192', W - 20, H - 12);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('\u2191 dimensione 2', 20, 12);
+  ctx.restore();
+}
+
+function drawDimensionNote(opacity) {
+  if (opacity <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.font = 'italic 14px Inter';
+  ctx.fillStyle = COLORS.gray;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('in realt\u00e0 sono 3.072 dimensioni \u2014 qui ne vediamo 2', W / 2, H - 16);
+  ctx.restore();
+}
+
+function drawClusterEllipse(groupKey, opacity) {
+  if (opacity <= 0) return;
+  var groupChips = chips.filter(function(c) { return c.group === groupKey; });
+  if (groupChips.length === 0) return;
+
+  var cx = 0, cy = 0;
+  groupChips.forEach(function(c) { cx += c.x; cy += c.y; });
+  cx /= groupChips.length;
+  cy /= groupChips.length;
+
+  var maxDx = 0, maxDy = 0;
+  groupChips.forEach(function(c) {
+    maxDx = Math.max(maxDx, Math.abs(c.x - cx));
+    maxDy = Math.max(maxDy, Math.abs(c.y - cy));
+  });
+
+  var rx = maxDx + 60;
+  var ry = maxDy + 40;
+
+  ctx.save();
+  ctx.globalAlpha = opacity * 0.3;
+  ctx.strokeStyle = GROUPS[groupKey].color;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 5]);
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawGroupLabel(groupKey, opacity) {
+  if (opacity <= 0) return;
+  var groupChips = chips.filter(function(c) { return c.group === groupKey; });
+  if (groupChips.length === 0) return;
+
+  var cx = 0, minY = Infinity;
+  groupChips.forEach(function(c) { cx += c.x; minY = Math.min(minY, c.y); });
+  cx /= groupChips.length;
+
+  ctx.save();
+  ctx.globalAlpha = opacity * 0.6;
+  ctx.font = '700 15px Inter';
+  ctx.fillStyle = GROUPS[groupKey].color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(GROUPS[groupKey].label, cx, minY - 30);
+  ctx.restore();
+}
+
+function drawAttractionLines(groupKey, opacity) {
+  if (opacity <= 0) return;
+  var groupChips = chips.filter(function(c) { return c.group === groupKey; });
+  ctx.save();
+  ctx.globalAlpha = opacity * 0.15;
+  ctx.strokeStyle = GROUPS[groupKey].color;
+  ctx.lineWidth = 1;
+  for (var i = 0; i < groupChips.length; i++) {
+    for (var j = i + 1; j < groupChips.length; j++) {
+      ctx.beginPath();
+      ctx.moveTo(groupChips[i].x, groupChips[i].y);
+      ctx.lineTo(groupChips[j].x, groupChips[j].y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// ── Spring physics ──
+function springInterp(t, damping, frequency) {
+  damping = damping || 0.7;
+  frequency = frequency || 3;
+  return 1 - Math.exp(-damping * t * 10) * Math.cos(frequency * t * Math.PI * 2);
+}
+
+function wobbleInterp(t) {
+  // Extra oscillation for the outlier
+  return 1 - Math.exp(-0.5 * t * 10) * Math.cos(5 * t * Math.PI * 2);
+}
+
+// ── Easing ──
+function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+function easeInOut(t) { return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2, 2)/2; }
+
+// ── Animation orchestrator ──
+var stepAnim = null; // { startTime, duration, update(progress), onDone? }
+
+function startStepAnimation(duration, updateFn, doneFn) {
+  animating = true;
+  stepAnim = {
+    startTime: performance.now(),
+    duration: duration,
+    update: updateFn,
+    onDone: doneFn || function() { animating = false; }
+  };
+}
+
+// ── Step transitions ──
+
+function goToStep0() {
+  currentStep = 0;
+  floating = false;
+  gridOpacity = 0;
+  coordBadgeOpacity = 0;
+  axisLabelOpacity = 0;
+  noteOpacity = 0;
+  clusterEllipseOpacity = 0;
+  groupLabelOpacity = 0;
+  attractionLineOpacity = 0;
+  queryChip = null;
+  queryVisible = 0;
+  dottedLineProgress = 0;
+  queryAtTarget = false;
+  radarActive = false;
+  radarTime = 0;
+  dimOthers = 0;
+  outlierBadgeOpacity = 0;
+  nearBadgeOpacity = 0;
+  zoomScale = 1;
+  legendOpacity = 0;
+  finalMsgOpacity = 0;
+  queryFadeOut = 0;
+
+  chips.forEach(function(c, i) {
+    c.glowing = false;
+    var listX = 60;
+    var listY = 40 + i * ((H - 80) / (DATA.length - 1));
+    c.startX = c.x; c.startY = c.y;
+    c.targetX = listX; c.targetY = listY;
+    c.opacity = 0;
+    c.vx = 0; c.vy = 0;
+  });
+
+  startStepAnimation(800, function(p) {
+    chips.forEach(function(c, i) {
+      var delay = i * 50 / 800;
+      var localP = Math.max(0, Math.min(1, (p - delay) / (1 - delay)));
+      c.opacity = easeOut(localP);
+      c.x = c.startX + (c.targetX - c.startX) * easeOut(localP);
+      c.y = c.startY + (c.targetY - c.startY) * easeOut(localP);
+    });
+  });
+}
+
+function goToStep1() {
+  currentStep = 1;
+  coordBadgeOpacity = 0;
+  axisLabelOpacity = 0;
+  noteOpacity = 0;
+  clusterEllipseOpacity = 0;
+  groupLabelOpacity = 0;
+
+  // Assign random positions
+  chips.forEach(function(c) {
+    c.startX = c.x; c.startY = c.y;
+    c.targetX = 80 + Math.random() * (W - 160);
+    c.targetY = 40 + Math.random() * (H - 80);
+    c.vx = (Math.random() - 0.5) * 0.6;
+    c.vy = (Math.random() - 0.5) * 0.6;
+    c.glowing = false;
+  });
+
+  startStepAnimation(1500, function(p) {
+    var ep = easeOut(p);
+    gridOpacity = p * 0.04;
+    chips.forEach(function(c) {
+      c.x = c.startX + (c.targetX - c.startX) * ep;
+      c.y = c.startY + (c.targetY - c.startY) * ep;
+      c.opacity = 1;
+    });
+  }, function() {
+    floating = true;
+    animating = false;
+  });
+}
+
+function goToStep2() {
+  currentStep = 2;
+  floating = false;
+  // Chips stay where they are
+
+  chips.forEach(function(c) {
+    c.vx = 0; c.vy = 0;
+  });
+
+  startStepAnimation(1500, function(p) {
+    gridOpacity = 0.04 + p * 0.04; // up to 0.08
+    coordBadgeOpacity = easeOut(Math.max(0, (p - 0.1) / 0.9));
+    axisLabelOpacity = easeOut(Math.max(0, (p - 0.3) / 0.7));
+    noteOpacity = easeOut(Math.max(0, (p - 0.5) / 0.5));
+  });
+}
+
+function goToStep3() {
+  currentStep = 3;
+
+  // Fade out coord badges
+  var fadePhase = true;
+  var mainStart = 0;
+
+  chips.forEach(function(c) {
+    c.startX = c.x; c.startY = c.y;
+    c.glowing = false;
+  });
+
+  startStepAnimation(4500, function(p) {
+    // Phase 1: fade badges (0 - 0.07 = ~300ms)
+    if (p < 0.07) {
+      coordBadgeOpacity = 1 - p / 0.07;
+      axisLabelOpacity = 1 - p / 0.07;
+      noteOpacity = 1 - p / 0.07;
+      return;
+    }
+    coordBadgeOpacity = 0;
+    axisLabelOpacity = 0;
+    noteOpacity = 0;
+
+    // Phase 2: spring animation (0.07 - 0.85 = ~3500ms)
+    var springP = Math.max(0, Math.min(1, (p - 0.07) / 0.78));
+
+    chips.forEach(function(c, i) {
+      var groupIdx = ['CIBO', 'LUOGHI', 'ATTIVITA', 'OUTLIER'].indexOf(c.group);
+      var inGroupIdx = chips.filter(function(cc, ii) { return ii < i && cc.group === c.group; }).length;
+      var stagger = inGroupIdx * 30 / 4500;
+      var localP = Math.max(0, Math.min(1, (springP - stagger) / (1 - stagger)));
+
+      var interp;
+      if (c.group === 'OUTLIER') {
+        interp = wobbleInterp(localP);
+      } else {
+        interp = springInterp(localP);
+      }
+
+      c.x = c.startX + (c.clusterTX - c.startX) * interp;
+      c.y = c.startY + (c.clusterTY - c.startY) * interp;
+
+      if (localP > 0.7) {
+        c.glowing = true;
+      }
+    });
+
+    // Attraction lines (progress 0.3-0.7 of spring phase)
+    if (springP > 0.3 && springP < 0.7) {
+      var lineP = (springP - 0.3) / 0.4;
+      attractionLineOpacity = lineP < 0.5 ? lineP * 2 : (1 - lineP) * 2;
+    } else {
+      attractionLineOpacity = 0;
+    }
+
+    // Ellipses and labels (spring > 0.7)
+    if (springP > 0.7) {
+      var settleP = (springP - 0.7) / 0.3;
+      clusterEllipseOpacity = easeOut(settleP);
+      groupLabelOpacity = easeOut(settleP);
+    }
+  }, function() {
+    chips.forEach(function(c) { c.glowing = true; });
+    clusterEllipseOpacity = 1;
+    groupLabelOpacity = 1;
+    attractionLineOpacity = 0;
+    animating = false;
+  });
+}
+
+function goToStep4() {
+  currentStep = 4;
+
+  // Find target positions
+  var schiacciata = chips[0]; // schiacciata pisana
+  var queryTargetX = schiacciata.x + 30;
+  var queryTargetY = schiacciata.y - 40;
+
+  queryChip = {
+    x: W / 2, y: 40,
+    startX: W / 2, startY: 40,
+    targetX: queryTargetX, targetY: queryTargetY,
+    label: 'focaccia', icon: '\uD83D\uDD0D', group: 'CIBO',
+    opacity: 1, vector: ''
+  };
+  queryVisible = 0;
+  dottedLineProgress = 0;
+  queryAtTarget = false;
+  radarActive = false;
+  radarTime = 0;
+  highlightOpacity = [0, 0, 0];
+  dimOthers = 0;
+  outlierBadgeOpacity = 0;
+  nearBadgeOpacity = 0;
+
+  // Compute CIBO cluster center for dotted line target
+  var ciboChips = chips.filter(function(c) { return c.group === 'CIBO'; });
+  var ciboCX = 0, ciboCY = 0;
+  ciboChips.forEach(function(c) { ciboCX += c.x; ciboCY += c.y; });
+  ciboCX /= ciboChips.length;
+  ciboCY /= ciboChips.length;
+
+  startStepAnimation(6000, function(p) {
+    // Phase 1: Query appears (0 - 0.1)
+    if (p < 0.1) {
+      queryVisible = easeOut(p / 0.1);
+      return;
+    }
+    queryVisible = 1;
+
+    // Phase 2: Dotted line traces (0.1 - 0.27)
+    if (p < 0.27) {
+      dottedLineProgress = easeInOut((p - 0.1) / 0.17);
+      return;
+    }
+    dottedLineProgress = 1;
+
+    // Phase 3: Query moves to target (0.27 - 0.42)
+    if (p < 0.42) {
+      var moveP = (p - 0.27) / 0.15;
+      var sp = springInterp(moveP, 0.8, 2);
+      queryChip.x = queryChip.startX + (queryChip.targetX - queryChip.startX) * sp;
+      queryChip.y = queryChip.startY + (queryChip.targetY - queryChip.startY) * sp;
+      // Start dimming during move
+      dimOthers = Math.min(0.6, moveP * 0.6);
+      return;
+    }
+    queryChip.x = queryChip.targetX;
+    queryChip.y = queryChip.targetY;
+    queryAtTarget = true;
+    dimOthers = 0.6;
+
+    // Phase 4: Radar + highlights (0.42 - 1.0)
+    radarActive = true;
+    radarTime = (p - 0.42) / 0.58;
+
+    // Staggered highlights
+    highlightOpacity[0] = easeOut(Math.max(0, Math.min(1, (p - 0.48) / 0.12)));
+    highlightOpacity[1] = easeOut(Math.max(0, Math.min(1, (p - 0.55) / 0.12)));
+    highlightOpacity[2] = easeOut(Math.max(0, Math.min(1, (p - 0.62) / 0.12)));
+    nearBadgeOpacity = easeOut(Math.max(0, Math.min(1, (p - 0.52) / 0.1)));
+    outlierBadgeOpacity = easeOut(Math.max(0, Math.min(1, (p - 0.7) / 0.1)));
+
+  }, function() {
+    queryVisible = 1;
+    dottedLineProgress = 1;
+    queryAtTarget = true;
+    radarActive = true;
+    dimOthers = 0.6;
+    highlightOpacity = [1, 1, 1];
+    nearBadgeOpacity = 1;
+    outlierBadgeOpacity = 1;
+    animating = false;
+  });
+}
+
+function goToStep5() {
+  currentStep = 5;
+  queryFadeOut = 0;
+
+  startStepAnimation(2500, function(p) {
+    // Phase 1: fade out query and radar (0 - 0.2)
+    if (p < 0.2) {
+      queryFadeOut = p / 0.2;
+      queryVisible = 1 - queryFadeOut;
+      dimOthers = 0.6 * (1 - p / 0.2);
+      highlightOpacity[0] = 1 - p / 0.2;
+      highlightOpacity[1] = 1 - p / 0.2;
+      highlightOpacity[2] = 1 - p / 0.2;
+      nearBadgeOpacity = 1 - p / 0.2;
+      outlierBadgeOpacity = 1 - p / 0.2;
+      radarActive = p < 0.15;
+    } else {
+      queryVisible = 0;
+      radarActive = false;
+      dimOthers = 0;
+      nearBadgeOpacity = 0;
+      outlierBadgeOpacity = 0;
+    }
+
+    // Phase 2: zoom out (0.2 - 0.5)
+    if (p > 0.2 && p < 0.5) {
+      zoomScale = 1 - 0.1 * easeInOut((p - 0.2) / 0.3);
+    } else if (p >= 0.5) {
+      zoomScale = 0.9;
+    }
+
+    // Phase 3: legend + final message (0.5 - 1.0)
+    if (p > 0.5) {
+      legendOpacity = easeOut((p - 0.5) / 0.25);
+      finalMsgOpacity = easeOut(Math.max(0, (p - 0.65) / 0.35));
+    }
+  }, function() {
+    queryVisible = 0;
+    radarActive = false;
+    dimOthers = 0;
+    zoomScale = 0.9;
+    legendOpacity = 1;
+    finalMsgOpacity = 1;
+    nearBadgeOpacity = 0;
+    outlierBadgeOpacity = 0;
+    animating = false;
+  });
+}
+
+// ── Main render ──
+
+function render() {
+  animFrame = requestAnimationFrame(render);
+  var now = performance.now();
+
+  // Update step animation
+  if (stepAnim) {
+    var elapsed = now - stepAnim.startTime;
+    var progress = Math.min(1, elapsed / stepAnim.duration);
+    stepAnim.update(progress);
+    if (progress >= 1) {
+      stepAnim.onDone();
+      stepAnim = null;
+    }
+  }
+
+  // Floating logic
+  if (floating) {
+    chips.forEach(function(c) {
+      c.x += c.vx;
+      c.y += c.vy;
+      var hw = measureChip(c.label) / 2 + 4;
+      if (c.x - hw < 0) { c.x = hw; c.vx = Math.abs(c.vx); }
+      if (c.x + hw > W) { c.x = W - hw; c.vx = -Math.abs(c.vx); }
+      if (c.y - 16 < 0) { c.y = 16; c.vy = Math.abs(c.vy); }
+      if (c.y + 16 > H) { c.y = H - 16; c.vy = -Math.abs(c.vy); }
+    });
+  }
+
+  // Clear
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = COLORS.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Apply zoom for step 5
+  if (zoomScale < 1) {
+    ctx.save();
+    ctx.translate(W / 2, H / 2);
+    ctx.scale(zoomScale, zoomScale);
+    ctx.translate(-W / 2, -H / 2);
+  }
+
+  // Grid
+  drawGrid(gridOpacity);
+
+  // Attraction lines (step 3)
+  if (attractionLineOpacity > 0) {
+    ['CIBO', 'LUOGHI', 'ATTIVITA'].forEach(function(g) {
+      drawAttractionLines(g, attractionLineOpacity);
+    });
+  }
+
+  // Cluster ellipses
+  if (clusterEllipseOpacity > 0) {
+    ['CIBO', 'LUOGHI', 'ATTIVITA', 'OUTLIER'].forEach(function(g) {
+      drawClusterEllipse(g, clusterEllipseOpacity);
+    });
+  }
+
+  // Dotted line (step 4)
+  if (dottedLineProgress > 0 && queryChip) {
+    var ciboChips = chips.filter(function(c) { return c.group === 'CIBO'; });
+    var ciboCX = 0, ciboCY = 0;
+    ciboChips.forEach(function(c) { ciboCX += c.x; ciboCY += c.y; });
+    ciboCX /= ciboChips.length;
+    ciboCY /= ciboChips.length;
+
+    var fromX = queryChip.startX;
+    var fromY = queryChip.startY + 16;
+    var toX = fromX + (ciboCX - fromX) * dottedLineProgress;
+    var toY = fromY + (ciboCY - fromY) * dottedLineProgress;
+
+    ctx.save();
+    ctx.strokeStyle = COLORS.orange;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(fromX, fromY);
+    ctx.lineTo(toX, toY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  // Radar effect (step 4)
+  if (radarActive && queryChip) {
+    ctx.save();
+    var radarNow = now / 1200; // continuous cycle ~1.2s per ring
+    for (var ring = 0; ring < 3; ring++) {
+      var t = (radarNow + ring * 0.33) % 1;
+      var radius = t * 120;
+      var alpha = (1 - t) * 0.3;
+      ctx.beginPath();
+      ctx.arc(queryChip.x, queryChip.y, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = COLORS.orange;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = alpha;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Chips
+  chips.forEach(function(c, i) {
+    var extraStyles = {};
+
+    // Dimming for step 4
+    if (dimOthers > 0 && c.group !== 'CIBO') {
+      extraStyles.opacity = c.opacity * (1 - dimOthers);
+    }
+
+    // Highlights for step 4
+    if (currentStep === 4 || (currentStep === 5 && dimOthers > 0)) {
+      if (i === 0 && highlightOpacity[0] > 0) { // schiacciata
+        extraStyles.highlightGlow = 16 * highlightOpacity[0];
+        extraStyles.highlightColor = COLORS.green + '80';
+        extraStyles.glow = true;
+      }
+      if (i === 2 && highlightOpacity[1] > 0) { // cecina
+        extraStyles.highlightGlow = 10 * highlightOpacity[1];
+        extraStyles.highlightColor = COLORS.orange + '60';
+        extraStyles.glow = true;
+      }
+      if (i === 3 && highlightOpacity[2] > 0) { // dove mangiare
+        extraStyles.highlightGlow = 6 * highlightOpacity[2];
+        extraStyles.highlightColor = COLORS.orange + '40';
+        extraStyles.glow = true;
+      }
+    }
+
+    drawChip(c, extraStyles);
+  });
+
+  // Coord badges (step 2)
+  if (coordBadgeOpacity > 0) {
+    chips.forEach(function(c, i) {
+      var staggered = Math.max(0, Math.min(1, (coordBadgeOpacity - i * 0.04)));
+      drawCoordBadge(c, staggered);
+    });
+  }
+
+  // Axis labels (step 2)
+  drawAxisLabels(axisLabelOpacity);
+  drawDimensionNote(noteOpacity);
+
+  // Group labels (step 3+)
+  if (groupLabelOpacity > 0) {
+    ['CIBO', 'LUOGHI', 'ATTIVITA'].forEach(function(g) {
+      drawGroupLabel(g, groupLabelOpacity);
+    });
+  }
+
+  // Outlier badge (step 3: prohibited sign, step 4: "lontanissimo" badge)
+  var outlierChip = chips[13]; // debugging PHP
+  if (clusterEllipseOpacity > 0 && currentStep === 3) {
+    ctx.save();
+    ctx.globalAlpha = clusterEllipseOpacity;
+    ctx.font = '19px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\uD83D\uDEAB', outlierChip.x + measureChip(outlierChip.label) / 2 + 6, outlierChip.y);
+    ctx.restore();
+  }
+
+  // "lontanissimo" badge for outlier (step 4)
+  if (outlierBadgeOpacity > 0 && currentStep >= 4) {
+    ctx.save();
+    ctx.globalAlpha = outlierBadgeOpacity * (dimOthers > 0 ? (1 - dimOthers) * 1.5 : 1);
+    ctx.font = '600 13px Inter';
+    ctx.fillStyle = COLORS.gray;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('lontanissimo \uD83D\uDE02', outlierChip.x, outlierChip.y + 25);
+    ctx.restore();
+  }
+
+  // "pi\u00f9 vicino!" badge (step 4)
+  if (nearBadgeOpacity > 0) {
+    var schiacciata = chips[0];
+    ctx.save();
+    ctx.globalAlpha = nearBadgeOpacity;
+    ctx.font = '700 13px Inter';
+    ctx.fillStyle = COLORS.green;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('pi\u00f9 vicino!', schiacciata.x, schiacciata.y + 25);
+    ctx.restore();
+  }
+
+  // Query chip (step 4)
+  if (queryChip && queryVisible > 0) {
+    drawChip(queryChip, {
+      opacity: queryVisible,
+      pulsingBorder: true
+    });
+  }
+
+  // Restore zoom
+  if (zoomScale < 1) {
+    ctx.restore();
+  }
+
+  // Legend (step 5) — drawn outside zoom
+  if (legendOpacity > 0) {
+    ctx.save();
+    ctx.globalAlpha = legendOpacity;
+    var legendItems = [
+      { color: COLORS.orange, label: 'CIBO' },
+      { color: COLORS.blue,   label: 'LUOGHI' },
+      { color: COLORS.purple, label: 'ATTIVIT\u00c0' },
+      { color: COLORS.gray,   label: 'OUTLIER' }
+    ];
+    ctx.font = '600 14px Inter';
+    var totalW = 0;
+    legendItems.forEach(function(item) {
+      totalW += 12 + 6 + ctx.measureText(item.label).width + 20;
+    });
+    var lx = (W - totalW) / 2;
+    var ly = H - 28;
+    legendItems.forEach(function(item) {
+      ctx.fillStyle = item.color;
+      ctx.beginPath();
+      ctx.arc(lx + 6, ly, 5, 0, Math.PI * 2);
+      ctx.fill();
+      lx += 16;
+      ctx.fillStyle = item.color;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.fillText(item.label, lx, ly);
+      lx += ctx.measureText(item.label).width + 20;
+    });
+    ctx.restore();
+  }
+
+  // Final message (step 5)
+  if (finalMsgOpacity > 0) {
+    ctx.save();
+    ctx.globalAlpha = finalMsgOpacity;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+
+    ctx.font = '700 18px Inter';
+    ctx.fillStyle = COLORS.dark;
+    ctx.fillText("L'embedding cattura il significato, non le parole esatte.", W / 2, H - 68);
+
+    ctx.font = '400 15px Inter';
+    ctx.fillStyle = '#6B7280';
+    ctx.fillText('Per questo il RAG trova risposte che la search tradizionale non troverebbe mai.', W / 2, H - 48);
+
+    ctx.restore();
+  }
+
+  // Update bottom bar
+  updateBottomBar();
+}
+
+function updateBottomBar() {
+  document.getElementById('step-num').textContent = 'Passo ' + currentStep + ' di 5';
+  document.getElementById('step-title').textContent = STEP_TITLES[currentStep] || '';
+}
+
+// ── Keyboard ──
+document.addEventListener('keydown', function(e) {
+  if (animating) return;
+
+  if (e.code === 'Space' || e.code === 'ArrowRight') {
+    e.preventDefault();
+    if (currentStep >= 5) return;
+    var nextStep = currentStep + 1;
+    switch (nextStep) {
+      case 0: goToStep0(); break;
+      case 1: goToStep1(); break;
+      case 2: goToStep2(); break;
+      case 3: goToStep3(); break;
+      case 4: goToStep4(); break;
+      case 5: goToStep5(); break;
+    }
+  }
+
+  if (e.code === 'ArrowLeft') {
+    e.preventDefault();
+    if (currentStep <= 0) return;
+    // Reset everything and replay to target step
+    var target = currentStep - 1;
+    resetToStep(target);
+  }
+
+  if (e.code === 'KeyR') {
+    e.preventDefault();
+    resetToStep(0);
+  }
+});
+
+function resetToStep(target) {
+  // Cancel current animation
+  stepAnim = null;
+  animating = false;
+  floating = false;
+  gridOpacity = 0;
+  coordBadgeOpacity = 0;
+  axisLabelOpacity = 0;
+  noteOpacity = 0;
+  clusterEllipseOpacity = 0;
+  groupLabelOpacity = 0;
+  attractionLineOpacity = 0;
+  queryChip = null;
+  queryVisible = 0;
+  dottedLineProgress = 0;
+  queryAtTarget = false;
+  radarActive = false;
+  highlightOpacity = [0, 0, 0];
+  dimOthers = 0;
+  outlierBadgeOpacity = 0;
+  nearBadgeOpacity = 0;
+  zoomScale = 1;
+  legendOpacity = 0;
+  finalMsgOpacity = 0;
+  queryFadeOut = 0;
+
+  // Reset chip positions to list
+  chips.forEach(function(c, i) {
+    c.x = 60;
+    c.y = 40 + i * ((H - 80) / (DATA.length - 1));
+    c.targetX = c.x; c.targetY = c.y;
+    c.startX = c.x; c.startY = c.y;
+    c.vx = 0; c.vy = 0;
+    c.glowing = false;
+    c.opacity = 1;
+  });
+
+  currentStep = 0;
+
+  if (target === 0) {
+    // Just show step 0 instantly
+    return;
+  }
+
+  // For going back, we fast-forward through steps
+  // We apply the final state of each step up to target
+  if (target >= 1) { applyStep1Final(); }
+  if (target >= 2) { applyStep2Final(); }
+  if (target >= 3) { applyStep3Final(); }
+  if (target >= 4) { applyStep4Final(); }
+  if (target >= 5) { applyStep5Final(); }
+}
+
+function applyStep1Final() {
+  currentStep = 1;
+  gridOpacity = 0.04;
+  // Random positions - use seeded pseudo-random for consistency on back
+  var seed = 42;
+  function seededRandom() {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  }
+  chips.forEach(function(c) {
+    c.x = 80 + seededRandom() * (W - 160);
+    c.y = 40 + seededRandom() * (H - 80);
+    c.vx = (seededRandom() - 0.5) * 0.6;
+    c.vy = (seededRandom() - 0.5) * 0.6;
+    c.opacity = 1;
+    c.glowing = false;
+  });
+  floating = true;
+}
+
+function applyStep2Final() {
+  currentStep = 2;
+  floating = false;
+  gridOpacity = 0.08;
+  coordBadgeOpacity = 1;
+  axisLabelOpacity = 1;
+  noteOpacity = 1;
+  chips.forEach(function(c) { c.vx = 0; c.vy = 0; });
+}
+
+function applyStep3Final() {
+  currentStep = 3;
+  floating = false;
+  coordBadgeOpacity = 0;
+  axisLabelOpacity = 0;
+  noteOpacity = 0;
+  gridOpacity = 0.08;
+  clusterEllipseOpacity = 1;
+  groupLabelOpacity = 1;
+  attractionLineOpacity = 0;
+  chips.forEach(function(c) {
+    c.x = c.clusterTX;
+    c.y = c.clusterTY;
+    c.glowing = true;
+  });
+}
+
+function applyStep4Final() {
+  currentStep = 4;
+  var schiacciata = chips[0];
+  queryChip = {
+    x: schiacciata.x + 30, y: schiacciata.y - 40,
+    startX: W / 2, startY: 40,
+    targetX: schiacciata.x + 30, targetY: schiacciata.y - 40,
+    label: 'focaccia', icon: '\uD83D\uDD0D', group: 'CIBO',
+    opacity: 1, vector: ''
+  };
+  queryVisible = 1;
+  dottedLineProgress = 1;
+  queryAtTarget = true;
+  radarActive = true;
+  radarTime = 0;
+  dimOthers = 0.6;
+  highlightOpacity = [1, 1, 1];
+  nearBadgeOpacity = 1;
+  outlierBadgeOpacity = 1;
+}
+
+function applyStep5Final() {
+  currentStep = 5;
+  queryVisible = 0;
+  radarActive = false;
+  dimOthers = 0;
+  nearBadgeOpacity = 0;
+  outlierBadgeOpacity = 0;
+  zoomScale = 0.9;
+  legendOpacity = 1;
+  finalMsgOpacity = 1;
+}
+
+// ── Resize ──
+window.addEventListener('resize', function() {
+  var oldW = W, oldH = H;
+  initCanvas();
+  // Rescale chip positions proportionally
+  var sx = W / oldW, sy = H / oldH;
+  chips.forEach(function(c) {
+    c.x *= sx; c.y *= sy;
+    c.targetX *= sx; c.targetY *= sy;
+    c.startX *= sx; c.startY *= sy;
+    c.clusterTX = scaleX(DATA[chips.indexOf(c)].tx);
+    c.clusterTY = scaleY(DATA[chips.indexOf(c)].ty);
+  });
+  if (queryChip) {
+    queryChip.x *= sx; queryChip.y *= sy;
+    queryChip.startX *= sx; queryChip.startY *= sy;
+    queryChip.targetX *= sx; queryChip.targetY *= sy;
+  }
+});
+
+// ── Toast ──
+function showToast() {
+  var toast = document.getElementById('toast');
+  toast.classList.add('show');
+  setTimeout(function() { toast.classList.remove('show'); }, 3000);
+}
+
+// ── Init ──
+function init() {
+  initCanvas();
+  initChips();
+  goToStep0();
+  render();
+  showToast();
+}
+
+// Wait for fonts to load
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(init);
+} else {
+  window.addEventListener('load', init);
+}
+
+})();
+</script>
+</body>
+</html>

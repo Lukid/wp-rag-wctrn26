@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+
+# Node
+node_modules/
+package-lock.json
+
+# Claude Code locale
+.claude/settings.local.json
+
+# Materiali interni di pianificazione (non pubblici)
+CLAUDE.md
+PIANO.md
+PRD.md
+gantt-wordcamp-torino.html
+docs/
+slides/index.html
+slides/assets/
+slides/node_modules/
+slides/package.json
+slides/package-lock.json
+slides/wordcamp-torino-template.pptx
+slides/download.pdf
+
+# Secret / locale
+.env
+.mcp.json
