@@ -11,43 +11,60 @@
     width: 100vw; height: 100vh; overflow: hidden;
     font-family: 'Inter', sans-serif;
     background: #F5EDE3;
+    color: #1D1D1B;
   }
-  #topBar {
-    height: 48px; background: #fff; border-bottom: 2px solid #E8DDD0;
+  header#topBar {
+    height: 64px; background: #fff; border-bottom: 3px solid #D9C7AE;
     display: flex; align-items: center; justify-content: space-between;
-    padding: 0 24px; position: relative; z-index: 10;
+    padding: 0 32px; position: relative; z-index: 10;
   }
-  #topBar .title { font-weight: 700; font-size: 16px; color: #1D1D1B; }
-  #topBar .event { font-weight: 400; font-size: 13px; color: #9CA3AF; }
+  header#topBar .title { font-weight: 700; font-size: 22px; color: #1D1D1B; letter-spacing: -0.01em; }
+  header#topBar .event { font-weight: 600; font-size: 16px; color: #4B5563; }
   #mainCanvas { display: block; }
-  #bottomBar {
-    height: 48px; background: #1D1D1B;
+  footer#bottomBar {
+    height: 64px; background: #1D1D1B;
     display: flex; align-items: center; justify-content: space-between;
-    padding: 0 24px; position: relative; z-index: 10; color: #fff;
+    padding: 0 32px; position: relative; z-index: 10; color: #fff;
   }
-  #bottomBar .step-num { font-weight: 600; font-size: 13px; }
-  #bottomBar .step-title { font-weight: 600; font-size: 14px; position: absolute; left: 50%; transform: translateX(-50%); }
-  #bottomBar .controls { font-weight: 400; font-size: 12px; color: #9CA3AF; }
+  footer#bottomBar .step-num { font-weight: 700; font-size: 18px; color: #fff; letter-spacing: 0.01em; }
+  footer#bottomBar .step-title { font-weight: 700; font-size: 22px; color: #FFB89A;
+    position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; }
+  footer#bottomBar .controls { font-weight: 500; font-size: 15px; color: #E5E7EB; }
+  footer#bottomBar .controls kbd {
+    display: inline-block; padding: 2px 8px; margin: 0 2px;
+    background: #374151; border-radius: 4px; font-family: inherit;
+    font-weight: 600; font-size: 13px; color: #fff;
+  }
   #toast {
-    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
-    background: rgba(29,29,27,0.88); color: #fff; padding: 10px 24px;
-    border-radius: 8px; font-size: 13px; font-weight: 600;
+    position: fixed; bottom: 88px; left: 50%; transform: translateX(-50%);
+    background: rgba(29,29,27,0.92); color: #fff; padding: 12px 28px;
+    border-radius: 10px; font-size: 16px; font-weight: 600;
     z-index: 100; transition: opacity 0.6s; pointer-events: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0);
+    white-space: nowrap; border: 0;
   }
 </style>
 </head>
 <body>
-<div id="topBar">
-  <span class="title">Pipeline di Ingestione RAG</span>
+<header id="topBar" role="banner">
+  <h1 class="title">Pipeline di Ingestione RAG</h1>
   <span class="event">WordCamp Torino 2026</span>
-</div>
-<canvas id="mainCanvas"></canvas>
-<div id="bottomBar">
+</header>
+<canvas id="mainCanvas" role="img" aria-label="Animazione pipeline ingestione RAG"></canvas>
+<div id="liveStatus" class="sr-only" aria-live="polite"></div>
+<footer id="bottomBar" role="contentinfo">
   <span class="step-num" id="stepNum">Passo 0 di 6</span>
   <span class="step-title" id="stepTitle">Pipeline di ingestione</span>
-  <span class="controls">SPAZIO = avanti &nbsp;|&nbsp; &larr; = indietro &nbsp;|&nbsp; R = reset</span>
-</div>
-<div id="toast">Premi F11 per lo schermo intero</div>
+  <span class="controls"><kbd>SPAZIO</kbd> avanti <kbd>&larr;</kbd> indietro <kbd>R</kbd> reset</span>
+</footer>
+<div id="toast" role="status">Premi F11 per lo schermo intero</div>
 
 <script>
 (function() {
@@ -136,7 +153,7 @@ let particles = []; // [{x,y,vx,vy,alpha,life}]
 
 function resize() {
   dpr = window.devicePixelRatio || 1;
-  const topH = 48, botH = 48;
+  const topH = 64, botH = 64;
   W = window.innerWidth;
   H = window.innerHeight - topH - botH;
   canvas.style.width = W + 'px';
@@ -162,9 +179,9 @@ function recalcLayout() {
   }
 
   // Post cards
-  const cardW = Math.min(260, zoneXs[0].w - 16);
-  const cardH = 42;
-  const cardGap = 8;
+  const cardW = Math.min(320, zoneXs[0].w - 16);
+  const cardH = 56;
+  const cardGap = 12;
   const totalCardsH = POSTS.length * cardH + (POSTS.length - 1) * cardGap;
   const cardsStartY = (H - totalCardsH) / 2;
   const cardCX = zoneXs[0].x + zoneXs[0].w / 2;
@@ -176,8 +193,8 @@ function recalcLayout() {
   }));
 
   // Stage boxes
-  const stageW = Math.min(148, zoneXs[1].w - 20);
-  const stageH = Math.min(220, usableH * 0.55);
+  const stageW = Math.min(180, zoneXs[1].w - 20);
+  const stageH = Math.min(300, usableH * 0.72);
   const stageCY = H / 2;
   stageBoxes = [];
   for (let i = 0; i < 4; i++) {
@@ -191,8 +208,8 @@ function recalcLayout() {
   }
 
   // Qdrant box
-  const qW = Math.min(160, zoneXs[5].w - 16);
-  const qH = Math.min(240, usableH * 0.6);
+  const qW = Math.min(200, zoneXs[5].w - 16);
+  const qH = Math.min(320, usableH * 0.78);
   qdrantBox = {
     x: zoneXs[5].x + (zoneXs[5].w - qW) / 2,
     y: stageCY - qH / 2,
@@ -256,15 +273,15 @@ function drawArrow(x1, y1, x2, y2, color, dashed, alpha) {
   ctx.save();
   ctx.globalAlpha = alpha || 1;
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1.5;
-  if (dashed) ctx.setLineDash([6, 4]);
+  ctx.lineWidth = dashed ? 2 : 3;
+  if (dashed) ctx.setLineDash([8, 6]);
   else ctx.setLineDash([]);
   ctx.beginPath();
   ctx.moveTo(x1, y1);
   ctx.lineTo(x2, y2);
   ctx.stroke();
   // Arrowhead
-  const sz = 7;
+  const sz = 11;
   const angle = Math.atan2(y2 - y1, x2 - x1);
   ctx.fillStyle = color;
   ctx.beginPath();
@@ -294,53 +311,53 @@ function drawPostCard(card) {
     ctx.shadowOffsetY = 4;
   }
   // Card body
-  roundRect(0, 0, card.w, card.h, 8);
+  roundRect(0, 0, card.w, card.h, 10);
   ctx.fillStyle = C.white;
   ctx.fill();
-  ctx.strokeStyle = C.beige;
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = '#C9B89E';
+  ctx.lineWidth = 1.5;
   ctx.stroke();
   // Orange left border
   ctx.fillStyle = C.orange;
-  roundRect(0, 0, 5, card.h, 8);
+  roundRect(0, 0, 7, card.h, 10);
   ctx.fill();
   ctx.fillStyle = C.orange;
-  ctx.fillRect(3, 4, 2, card.h - 8);
+  ctx.fillRect(3, 4, 4, card.h - 8);
   // Title
   ctx.shadowColor = 'transparent';
   ctx.fillStyle = C.dark;
-  ctx.font = '600 13px Inter';
+  ctx.font = '700 17px Inter';
   ctx.textBaseline = 'middle';
-  const maxTextW = card.w - 24;
+  const maxTextW = card.w - 28;
   let title = card.title;
   if (ctx.measureText(title).width > maxTextW) {
     while (ctx.measureText(title + '...').width > maxTextW && title.length > 5) title = title.slice(0, -1);
     title += '...';
   }
-  ctx.fillText(title, 14, card.h / 2 - 5);
+  ctx.fillText(title, 18, card.h / 2 - 8);
   // Badge
-  ctx.font = '400 9px Inter';
-  ctx.fillStyle = C.green;
-  ctx.fillText('Pubblicato', 14, card.h / 2 + 9);
+  ctx.font = '600 13px Inter';
+  ctx.fillStyle = '#15803D';
+  ctx.fillText('● Pubblicato', 18, card.h / 2 + 12);
   ctx.restore();
 }
 
 function drawStageBox(box, index) {
   ctx.save();
-  roundRect(box.x, box.y, box.w, box.h, 12);
+  roundRect(box.x, box.y, box.w, box.h, 14);
   if (box.active) {
-    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
     ctx.fill();
     ctx.strokeStyle = C.orange;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 4;
     ctx.setLineDash([]);
     ctx.stroke();
   } else {
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
     ctx.fill();
-    ctx.strokeStyle = C.beige;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = '#B8A788';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([8, 5]);
     ctx.stroke();
     ctx.setLineDash([]);
   }
@@ -348,11 +365,11 @@ function drawStageBox(box, index) {
   const st = STAGES[index];
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.font = '30px Inter';
-  ctx.fillText(st.icon, box.x + box.w / 2, box.y + 14);
-  ctx.font = '600 14px Inter';
-  ctx.fillStyle = box.active ? C.dark : C.gray;
-  ctx.fillText(st.label, box.x + box.w / 2, box.y + 50);
+  ctx.font = '40px Inter';
+  ctx.fillText(st.icon, box.x + box.w / 2, box.y + 18);
+  ctx.font = '700 18px Inter';
+  ctx.fillStyle = box.active ? C.dark : '#4B5563';
+  ctx.fillText(st.label, box.x + box.w / 2, box.y + 66);
   ctx.textAlign = 'left';
   ctx.restore();
 }
@@ -360,18 +377,18 @@ function drawStageBox(box, index) {
 function drawQdrant() {
   ctx.save();
   const b = qdrantBox;
-  roundRect(b.x, b.y, b.w, b.h, 12);
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  roundRect(b.x, b.y, b.w, b.h, 14);
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.fill();
 
   // Border: blue normally, pulse green when qdrantPulse > 0
   if (qdrantPulse > 0) {
     ctx.strokeStyle = C.green;
-    ctx.lineWidth = 2.5 + qdrantPulse * 2;
-    ctx.globalAlpha = 0.5 + qdrantPulse * 0.5;
+    ctx.lineWidth = 4 + qdrantPulse * 3;
+    ctx.globalAlpha = 0.6 + qdrantPulse * 0.4;
   } else {
     ctx.strokeStyle = C.blue;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 4;
   }
   ctx.setLineDash([]);
   ctx.stroke();
@@ -379,48 +396,46 @@ function drawQdrant() {
 
   // Database icon (simplified cylinder)
   const iconCX = b.x + b.w / 2;
-  const iconCY = b.y + 28;
+  const iconCY = b.y + 36;
   ctx.fillStyle = C.blue;
   ctx.beginPath();
-  ctx.ellipse(iconCX, iconCY - 6, 18, 7, 0, 0, Math.PI * 2);
+  ctx.ellipse(iconCX, iconCY - 8, 24, 9, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = 'rgba(37,99,235,0.7)';
-  ctx.fillRect(iconCX - 18, iconCY - 6, 36, 18);
+  ctx.fillStyle = 'rgba(37,99,235,0.78)';
+  ctx.fillRect(iconCX - 24, iconCY - 8, 48, 24);
   ctx.fillStyle = C.blue;
   ctx.beginPath();
-  ctx.ellipse(iconCX, iconCY + 12, 18, 7, 0, 0, Math.PI * 2);
+  ctx.ellipse(iconCX, iconCY + 16, 24, 9, 0, 0, Math.PI * 2);
   ctx.fill();
 
   // Label
   ctx.textAlign = 'center';
-  ctx.font = '700 15px Inter';
+  ctx.font = '800 22px Inter';
   ctx.fillStyle = C.blue;
-  ctx.fillText('Qdrant', b.x + b.w / 2, b.y + 56);
+  ctx.fillText('Qdrant', b.x + b.w / 2, b.y + 70);
 
   // Counter badge
-  ctx.font = '700 14px Inter';
+  ctx.font = '800 22px Inter';
   const counterText = qdrantCount + '/20';
   const tw = ctx.measureText(counterText).width;
-  const badgeW = tw + 16;
-  const badgeH = 24;
+  const badgeW = tw + 28;
+  const badgeH = 36;
   const badgeX = b.x + (b.w - badgeW) / 2;
-  const badgeY = b.y + 70;
-  roundRect(badgeX, badgeY, badgeW, badgeH, 6);
-  ctx.fillStyle = qdrantCount >= 20 ? C.green : C.beige;
+  const badgeY = b.y + 100;
+  roundRect(badgeX, badgeY, badgeW, badgeH, 8);
+  ctx.fillStyle = qdrantCount >= 20 ? C.green : '#1D1D1B';
   ctx.fill();
-  ctx.fillStyle = qdrantCount >= 20 ? C.white : C.dark;
+  ctx.fillStyle = C.white;
   ctx.textBaseline = 'middle';
   ctx.fillText(counterText, b.x + b.w / 2, badgeY + badgeH / 2);
   ctx.textBaseline = 'top';
 
   // Dots area
-  const dotsAreaY = badgeY + badgeH + 12;
-  const dotsAreaH = b.y + b.h - dotsAreaY - 30;
   for (let d of qdrantDots) {
     ctx.beginPath();
-    ctx.arc(d.x, d.y, 3.5, 0, Math.PI * 2);
+    ctx.arc(d.x, d.y, 5, 0, Math.PI * 2);
     ctx.fillStyle = d.color;
-    ctx.globalAlpha = 0.7;
+    ctx.globalAlpha = 0.85;
     ctx.fill();
     ctx.globalAlpha = 1;
   }
@@ -428,17 +443,17 @@ function drawQdrant() {
   // Checkmark
   if (qdrantCheckmark > 0) {
     ctx.globalAlpha = qdrantCheckmark;
-    ctx.font = '28px Inter';
-    ctx.fillText('\u2705', b.x + b.w / 2, b.y + b.h - 32);
+    ctx.font = '40px Inter';
+    ctx.fillText('\u2705', b.x + b.w / 2, b.y + b.h - 48);
     ctx.globalAlpha = 1;
   }
 
   // Final label
   if (finalLabel > 0) {
     ctx.globalAlpha = finalLabel;
-    ctx.font = '700 15px Inter';
+    ctx.font = '800 20px Inter';
     ctx.fillStyle = C.green;
-    ctx.fillText('20 contenuti indicizzati', b.x + b.w / 2, b.y + b.h + 8);
+    ctx.fillText('20 contenuti indicizzati', b.x + b.w / 2, b.y + b.h + 14);
     ctx.globalAlpha = 1;
   }
 
@@ -452,7 +467,7 @@ function drawParticles() {
     ctx.globalAlpha = p.alpha * Math.min(1, p.life * 4);
     ctx.fillStyle = p.color || C.orange;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size || 3, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, p.size || 5, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
@@ -468,7 +483,7 @@ function spawnParticles(x1, y1, x2, y2, count, color) {
       speed: 0.6 + Math.random() * 0.3,
       alpha: 0.6 + Math.random() * 0.3,
       color: color || C.orange,
-      size: 2.5 + Math.random() * 1.5,
+      size: 4 + Math.random() * 2,
       life: 1,
       done: false,
     });
@@ -541,10 +556,10 @@ function isArrowActive(i) {
 
 function drawStageContent(stageIndex) {
   const box = stageBoxes[stageIndex];
-  const contentY = box.y + 70;
-  const contentH = box.h - 80;
-  const contentW = box.w - 20;
-  const contentX = box.x + 10;
+  const contentY = box.y + 96;
+  const contentH = box.h - 110;
+  const contentW = box.w - 24;
+  const contentX = box.x + 12;
 
   // Step 1: extract text
   if (stageIndex === 0 && currentStep >= 1 && currentStep < 6) {
@@ -553,10 +568,10 @@ function drawStageContent(stageIndex) {
       const a = extractText.alpha[i] || 0;
       if (a <= 0) continue;
       ctx.globalAlpha = a;
-      ctx.font = i === 0 ? '700 11px Inter' : '400 11px Inter';
+      ctx.font = i === 0 ? '700 14px Inter' : '500 14px Inter';
       ctx.fillStyle = C.dark;
       ctx.textBaseline = 'top';
-      ctx.fillText(extractText.lines[i], contentX + 4, contentY + i * 16, contentW - 8);
+      ctx.fillText(extractText.lines[i], contentX + 4, contentY + i * 20, contentW - 8);
     }
     ctx.restore();
   }
@@ -567,27 +582,27 @@ function drawStageContent(stageIndex) {
     ctx.globalAlpha = chunkState.alpha;
     // Chunk border
     if (chunkState.borderAlpha > 0) {
-      roundRect(contentX, contentY, contentW, 72, 6);
+      roundRect(contentX, contentY, contentW, 96, 8);
       ctx.strokeStyle = C.blue;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2.5;
       ctx.globalAlpha = chunkState.borderAlpha;
       ctx.stroke();
       ctx.globalAlpha = chunkState.alpha;
     }
     // Text inside chunk
     for (let i = 0; i < MARKDOWN_LINES.length; i++) {
-      ctx.font = i === 0 ? '700 11px Inter' : '400 11px Inter';
+      ctx.font = i === 0 ? '700 13px Inter' : '500 13px Inter';
       ctx.fillStyle = C.dark;
       ctx.textBaseline = 'top';
-      ctx.fillText(MARKDOWN_LINES[i], contentX + 6, contentY + 6 + i * 14, contentW - 12);
+      ctx.fillText(MARKDOWN_LINES[i], contentX + 8, contentY + 8 + i * 18, contentW - 16);
     }
     // Label
     if (chunkState.labelAlpha > 0) {
       ctx.globalAlpha = chunkState.labelAlpha;
-      ctx.font = '400 11px Inter';
-      ctx.fillStyle = C.gray;
+      ctx.font = '600 14px Inter';
+      ctx.fillStyle = '#4B5563';
       ctx.textAlign = 'center';
-      ctx.fillText('~500 parole \u2192 1 chunk', box.x + box.w / 2, contentY + 82);
+      ctx.fillText('~500 parole \u2192 1 chunk', box.x + box.w / 2, contentY + 110);
       ctx.textAlign = 'left';
     }
     ctx.restore();
@@ -622,11 +637,11 @@ function drawStageContent(stageIndex) {
     // Numbers appearing
     if (embedState.numbersAlpha > 0) {
       const nums = ['0.23', '-0.87', '0.41', '0.12', '-0.55', '0.78', '-0.33', '0.91', '-0.16', '0.67', '-0.44', '0.29'];
-      ctx.font = '600 10px Inter';
+      ctx.font = '700 13px Inter';
       ctx.fillStyle = C.orange;
       for (let i = 0; i < nums.length; i++) {
         const angle = (i / nums.length) * Math.PI * 2;
-        const radius = 42 * (1 - embedState.sphereScale * 0.6);
+        const radius = 56 * (1 - embedState.sphereScale * 0.6);
         const nx = centerX + Math.cos(angle) * radius;
         const ny = centerY + Math.sin(angle) * radius * 0.7;
         ctx.globalAlpha = embedState.numbersAlpha * (1 - embedState.sphereScale * 0.5);
@@ -638,7 +653,7 @@ function drawStageContent(stageIndex) {
     // Glowing sphere
     if (embedState.sphereAlpha > 0) {
       ctx.globalAlpha = embedState.sphereAlpha;
-      const r = 10 + Math.sin(Date.now() * 0.005) * 2;
+      const r = 14 + Math.sin(Date.now() * 0.005) * 3;
       // Glow
       const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, r * 2.5);
       grad.addColorStop(0, 'rgba(232,100,60,0.5)');
@@ -656,10 +671,10 @@ function drawStageContent(stageIndex) {
     // Dimension label
     if (embedState.dimLabel > 0) {
       ctx.globalAlpha = embedState.dimLabel;
-      ctx.font = '400 11px Inter';
-      ctx.fillStyle = C.gray;
+      ctx.font = '700 15px Inter';
+      ctx.fillStyle = '#4B5563';
       ctx.textAlign = 'center';
-      ctx.fillText('3.072 dimensioni', box.x + box.w / 2, box.y + box.h - 20);
+      ctx.fillText('3.072 dimensioni', box.x + box.w / 2, box.y + box.h - 28);
       ctx.textAlign = 'left';
     }
     ctx.restore();
@@ -672,8 +687,8 @@ function drawStageContent(stageIndex) {
     const centerY = box.y + box.h / 2;
 
     if (dualState.phase !== 'idle') {
-      const sep = dualState.split * 28;
-      const orbitR = 20;
+      const sep = dualState.split * 44;
+      const orbitR = 28;
       let ox1, oy1, ox2, oy2;
 
       if (dualState.orbitAngle > 0 && dualState.orbitAngle < Math.PI * 2) {
@@ -692,44 +707,44 @@ function drawStageContent(stageIndex) {
 
       // Dense point (orange)
       ctx.globalAlpha = 1;
-      const gr1 = ctx.createRadialGradient(ox1, oy1, 0, ox1, oy1, 16);
-      gr1.addColorStop(0, 'rgba(232,100,60,0.4)');
+      const gr1 = ctx.createRadialGradient(ox1, oy1, 0, ox1, oy1, 22);
+      gr1.addColorStop(0, 'rgba(232,100,60,0.45)');
       gr1.addColorStop(1, 'rgba(232,100,60,0)');
       ctx.fillStyle = gr1;
       ctx.beginPath();
-      ctx.arc(ox1, oy1, 16, 0, Math.PI * 2);
+      ctx.arc(ox1, oy1, 22, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = C.orange;
       ctx.beginPath();
-      ctx.arc(ox1, oy1, 7, 0, Math.PI * 2);
+      ctx.arc(ox1, oy1, 11, 0, Math.PI * 2);
       ctx.fill();
 
       // BM25 point (blue)
-      const gr2 = ctx.createRadialGradient(ox2, oy2, 0, ox2, oy2, 16);
-      gr2.addColorStop(0, 'rgba(37,99,235,0.4)');
+      const gr2 = ctx.createRadialGradient(ox2, oy2, 0, ox2, oy2, 22);
+      gr2.addColorStop(0, 'rgba(37,99,235,0.45)');
       gr2.addColorStop(1, 'rgba(37,99,235,0)');
       ctx.fillStyle = gr2;
       ctx.beginPath();
-      ctx.arc(ox2, oy2, 16, 0, Math.PI * 2);
+      ctx.arc(ox2, oy2, 22, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = C.blue;
       ctx.beginPath();
-      ctx.arc(ox2, oy2, 7, 0, Math.PI * 2);
+      ctx.arc(ox2, oy2, 11, 0, Math.PI * 2);
       ctx.fill();
 
       // Labels
       if (dualState.labelsAlpha > 0) {
         ctx.globalAlpha = dualState.labelsAlpha;
         ctx.textAlign = 'center';
-        ctx.font = '700 11px Inter';
+        ctx.font = '800 15px Inter';
         ctx.fillStyle = C.orange;
-        ctx.fillText('Dense', centerX - sep, centerY + 22);
+        ctx.fillText('Dense', centerX - sep, centerY + 32);
         ctx.fillStyle = C.blue;
-        ctx.fillText('BM25', centerX + sep, centerY + 22);
-        ctx.font = '400 10px Inter';
-        ctx.fillStyle = C.gray;
-        ctx.fillText('significato', centerX - sep, centerY + 36);
-        ctx.fillText('parole chiave', centerX + sep, centerY + 36);
+        ctx.fillText('BM25', centerX + sep, centerY + 32);
+        ctx.font = '600 12px Inter';
+        ctx.fillStyle = '#4B5563';
+        ctx.fillText('significato', centerX - sep, centerY + 50);
+        ctx.fillText('parole chiave', centerX + sep, centerY + 50);
         ctx.textAlign = 'left';
       }
     }
@@ -742,20 +757,20 @@ function drawStageContent(stageIndex) {
       if (!trail.active) continue;
       ctx.save();
       // Comet tail
-      const tailLen = 8;
+      const tailLen = 10;
       for (let t = 0; t < tailLen; t++) {
         const tt = t / tailLen;
-        ctx.globalAlpha = (1 - tt) * 0.4 * trail.opacity;
+        ctx.globalAlpha = (1 - tt) * 0.5 * trail.opacity;
         ctx.fillStyle = trail.color;
         ctx.beginPath();
-        ctx.arc(trail.x - t * 8, trail.y, 4 - tt * 2, 0, Math.PI * 2);
+        ctx.arc(trail.x - t * 10, trail.y, 6 - tt * 3, 0, Math.PI * 2);
         ctx.fill();
       }
       // Head
       ctx.globalAlpha = trail.opacity;
       ctx.fillStyle = trail.color;
       ctx.beginPath();
-      ctx.arc(trail.x, trail.y, 5, 0, Math.PI * 2);
+      ctx.arc(trail.x, trail.y, 8, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -923,11 +938,11 @@ function applyStepInstant(step) {
 
 function addQdrantDot(color) {
   const b = qdrantBox;
-  const dotsAreaY = b.y + 110;
-  const dotsAreaH = b.h - 145;
-  const dotsAreaW = b.w - 20;
+  const dotsAreaY = b.y + 150;
+  const dotsAreaH = b.h - 210;
+  const dotsAreaW = b.w - 28;
   qdrantDots.push({
-    x: b.x + 10 + Math.random() * dotsAreaW,
+    x: b.x + 14 + Math.random() * dotsAreaW,
     y: dotsAreaY + Math.random() * dotsAreaH,
     color: color,
   });
@@ -1290,6 +1305,8 @@ function runStep6() {
 function updateUI() {
   document.getElementById('stepNum').textContent = 'Passo ' + currentStep + ' di 6';
   document.getElementById('stepTitle').textContent = STEP_TITLES[currentStep] || '';
+  const live = document.getElementById('liveStatus');
+  if (live) live.textContent = 'Passo ' + currentStep + ' di 6: ' + (STEP_TITLES[currentStep] || '');
 }
 
 // ---------- INPUT ----------

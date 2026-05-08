@@ -13,49 +13,65 @@
     width: 100vw; height: 100vh; overflow: hidden;
     font-family: 'Inter', sans-serif;
     background: #F5EDE3;
+    color: #1D1D1B;
   }
-  #top-bar {
-    height: 48px; display: flex; align-items: center; justify-content: space-between;
-    padding: 0 24px; background: #fff; border-bottom: 2px solid #E8DDD0;
+  header#top-bar {
+    height: 64px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 32px; background: #fff; border-bottom: 3px solid #D9C7AE;
     position: relative; z-index: 10;
   }
-  #top-bar .title { font-weight: 700; font-size: 16px; color: #1D1D1B; }
-  #top-bar .event { font-weight: 400; font-size: 13px; color: #9CA3AF; }
+  header#top-bar .title { font-weight: 700; font-size: 22px; color: #1D1D1B; letter-spacing: -0.01em; }
+  header#top-bar .event { font-weight: 600; font-size: 16px; color: #4B5563; }
   #canvas-wrap {
-    position: relative; width: 100%; height: calc(100vh - 96px);
+    position: relative; width: 100%; height: calc(100vh - 128px);
   }
   canvas { display: block; width: 100%; height: 100%; }
-  #bottom-bar {
-    height: 48px; display: flex; align-items: center; justify-content: space-between;
-    padding: 0 24px; background: #1D1D1B; position: relative; z-index: 10;
+  footer#bottom-bar {
+    height: 64px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 32px; background: #1D1D1B; position: relative; z-index: 10;
   }
-  #bottom-bar .step-num { font-weight: 600; font-size: 14px; color: #fff; }
-  #bottom-bar .step-title { font-weight: 600; font-size: 14px; color: #E8643C;
+  footer#bottom-bar .step-num { font-weight: 700; font-size: 18px; color: #fff; letter-spacing: 0.01em; }
+  footer#bottom-bar .step-title { font-weight: 700; font-size: 22px; color: #FFB89A;
     position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; }
-  #bottom-bar .controls { font-weight: 400; font-size: 12px; color: #9CA3AF; }
+  footer#bottom-bar .controls { font-weight: 500; font-size: 15px; color: #E5E7EB; }
+  footer#bottom-bar .controls kbd {
+    display: inline-block; padding: 2px 8px; margin: 0 2px;
+    background: #374151; border-radius: 4px; font-family: inherit;
+    font-weight: 600; font-size: 13px; color: #fff;
+  }
   #toast {
-    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
-    background: rgba(29,29,27,0.88); color: #fff; padding: 10px 24px;
-    border-radius: 8px; font-size: 13px; font-weight: 600;
+    position: fixed; bottom: 88px; left: 50%; transform: translateX(-50%);
+    background: rgba(29,29,27,0.92); color: #fff; padding: 12px 28px;
+    border-radius: 10px; font-size: 16px; font-weight: 600;
     opacity: 0; transition: opacity 0.5s; z-index: 100; pointer-events: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
   }
   #toast.show { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0);
+    white-space: nowrap; border: 0;
+  }
 </style>
 </head>
 <body>
-<div id="top-bar">
-  <span class="title">Pipeline di Query RAG</span>
+<header id="top-bar" role="banner">
+  <h1 class="title">Pipeline di Query RAG</h1>
   <span class="event">WordCamp Torino 2026</span>
-</div>
+</header>
 <div id="canvas-wrap">
-  <canvas id="c"></canvas>
+  <canvas id="c" role="img" aria-label="Animazione pipeline query RAG"></canvas>
 </div>
-<div id="bottom-bar">
+<div id="liveStatus" class="sr-only" aria-live="polite"></div>
+<footer id="bottom-bar" role="contentinfo">
   <span class="step-num" id="step-num">Passo 0 di 7</span>
   <span class="step-title" id="step-title">Pipeline di query</span>
-  <span class="controls">SPAZIO = avanti | &larr; = indietro | R = reset</span>
-</div>
-<div id="toast">Premi F11 per lo schermo intero</div>
+  <span class="controls"><kbd>SPAZIO</kbd> avanti <kbd>&larr;</kbd> indietro <kbd>R</kbd> reset</span>
+</footer>
+<div id="toast" role="status">Premi F11 per lo schermo intero</div>
 
 <script>
 (function() {
@@ -109,10 +125,10 @@ function resize() {
 // ── Layout ──
 let stageRects = []; // {x, y, w, h} for each stage
 let arrowSegs = [];  // {x1,y1,x2,y2} between stages
-const STAGE_GAP_RATIO = 0.025;
-const STAGE_WIDTH_RATIO = 0.13;
-const STAGE_HEIGHT_RATIO = 0.55;
-const MARGIN_X_RATIO = 0.04;
+const STAGE_GAP_RATIO = 0.012;
+const STAGE_WIDTH_RATIO = 0.146;
+const STAGE_HEIGHT_RATIO = 0.62;
+const MARGIN_X_RATIO = 0.025;
 
 function computeLayout() {
   stageRects = [];
@@ -214,22 +230,37 @@ function initDotPositions() {
   const rng = seededRandom(42);
   const r3 = stageRects[2];
   const cx = r3.x + r3.w * 0.45;
-  const cy = r3.y + r3.h * 0.5;
-  const radiusX = r3.w * 0.32;
-  const radiusY = r3.h * 0.32;
+  const cy = r3.y + r3.h * 0.55;
+  const radiusX = r3.w * 0.34;
+  const radiusY = r3.h * 0.30;
   dotPositions = [];
+  // Place the top-5 lit dots at fixed, non-overlapping positions
+  const litLayout = [
+    { dx: 0.05,  dy: 0.10 },   // Schiacce
+    { dx: -0.45, dy: -0.25 },  // Montino
+    { dx: 0.55,  dy: -0.15 },  // Dove mangiare
+    { dx: -0.45, dy: 0.45 },   // Pisa bambini
+    { dx: 0.50,  dy: 0.40 }    // Guida gastronomica
+  ];
   for (let i = 0; i < 20; i++) {
-    const angle = rng() * Math.PI * 2;
-    const dist = Math.sqrt(rng()) * 0.95;
-    dotPositions.push({
-      x: cx + Math.cos(angle) * dist * radiusX,
-      y: cy + Math.sin(angle) * dist * radiusY,
-      name: DOC_NAMES[i],
-      lit: false,
-      litSize: 5,
-      litAlpha: 0.35,
-      labelAlpha: 0
-    });
+    if (i < 5) {
+      const layout = litLayout[i];
+      dotPositions.push({
+        x: cx + layout.dx * radiusX,
+        y: cy + layout.dy * radiusY,
+        name: DOC_NAMES[i],
+        lit: false, litSize: 5, litAlpha: 0.35, labelAlpha: 0
+      });
+    } else {
+      const angle = rng() * Math.PI * 2;
+      const dist = 0.6 + Math.sqrt(rng()) * 0.4;
+      dotPositions.push({
+        x: cx + Math.cos(angle) * dist * radiusX,
+        y: cy + Math.sin(angle) * dist * radiusY,
+        name: DOC_NAMES[i],
+        lit: false, litSize: 5, litAlpha: 0.35, labelAlpha: 0
+      });
+    }
   }
 }
 
@@ -299,7 +330,7 @@ function wrapText(text, maxWidth, fontSize) {
 
 // ── Scale helper ──
 function s(v) {
-  return v * Math.min(W / 1440, H / 760);
+  return v * Math.min(W / 1280, H / 720);
 }
 
 // ── Draw stage containers ──
@@ -312,44 +343,44 @@ function drawStage(idx, active, glowColor) {
   // Background
   roundRect(r.x, r.y, r.w, r.h, borderR);
   if (active) {
-    ctx.fillStyle = hexToRgba(C.white, 0.85);
+    ctx.fillStyle = hexToRgba(C.white, 0.92);
     ctx.fill();
     // Shadow
     ctx.save();
-    ctx.shadowColor = hexToRgba(stage.color, 0.15);
-    ctx.shadowBlur = s(12);
-    ctx.shadowOffsetY = s(2);
+    ctx.shadowColor = hexToRgba(stage.color, 0.2);
+    ctx.shadowBlur = s(14);
+    ctx.shadowOffsetY = s(3);
     roundRect(r.x, r.y, r.w, r.h, borderR);
     ctx.fill();
     ctx.restore();
     // Border
     ctx.strokeStyle = glowColor || stage.color;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 4;
     ctx.setLineDash([]);
     ctx.stroke();
   } else {
-    ctx.fillStyle = hexToRgba(C.white, 0.3);
+    ctx.fillStyle = hexToRgba(C.white, 0.45);
     ctx.fill();
-    ctx.strokeStyle = C.beige;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = '#B8A788';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([8, 5]);
     ctx.stroke();
     ctx.setLineDash([]);
   }
 
   // Emoji icon
-  const emojiSize = s(34);
+  const emojiSize = s(40);
   ctx.font = `${emojiSize}px Inter`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillStyle = active ? C.dark : C.lightGray;
-  ctx.fillText(stage.emoji, r.x + r.w / 2, r.y + s(12));
+  ctx.fillStyle = active ? C.dark : '#9CA3AF';
+  ctx.fillText(stage.emoji, r.x + r.w / 2, r.y + s(14));
 
   // Label
-  const labelSize = s(14);
-  ctx.font = `600 ${labelSize}px Inter`;
-  ctx.fillStyle = active ? stage.color : C.lightGray;
-  ctx.fillText(stage.label, r.x + r.w / 2, r.y + s(12) + emojiSize + s(6));
+  const labelSize = s(18);
+  ctx.font = `800 ${labelSize}px Inter`;
+  ctx.fillStyle = active ? stage.color : '#4B5563';
+  ctx.fillText(stage.label, r.x + r.w / 2, r.y + s(14) + emojiSize + s(8));
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
 }
@@ -363,19 +394,19 @@ function drawArrow(idx, active, color) {
   ctx.lineTo(seg.x2, midY);
   if (active) {
     ctx.strokeStyle = color || C.orange;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 3;
     ctx.setLineDash([]);
   } else {
-    ctx.strokeStyle = C.beige;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = '#B8A788';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 5]);
   }
   ctx.stroke();
   ctx.setLineDash([]);
 
   // Arrowhead
-  const ahColor = active ? (color || C.orange) : C.beige;
-  drawArrowhead(seg.x2 - 2, midY, 0, s(8), ahColor);
+  const ahColor = active ? (color || C.orange) : '#B8A788';
+  drawArrowhead(seg.x2 - 2, midY, 0, s(11), ahColor);
 }
 
 // ── Arrow particles ──
@@ -422,15 +453,15 @@ function maybeSpawnParticles() {
 const QUESTION = 'Dove mangio una buona focaccia a Pisa?';
 
 function drawTypewriter(rect, chars, showCursor) {
-  const fontSize = s(14);
-  const maxW = rect.w - s(24);
-  ctx.font = `600 ${fontSize}px Inter`;
+  const fontSize = s(17);
+  const maxW = rect.w - s(28);
+  ctx.font = `700 ${fontSize}px Inter`;
   const allLines = wrapText(QUESTION, maxW, fontSize);
 
   let totalDrawn = 0;
   const lineHeight = fontSize * 1.45;
   const totalLines = allLines.length;
-  const startY = rect.y + s(74) + (rect.h - s(74)) / 2 - (totalLines * lineHeight) / 2;
+  const startY = rect.y + s(108) + (rect.h - s(108)) / 2 - (totalLines * lineHeight) / 2;
 
   for (let li = 0; li < allLines.length; li++) {
     const lineText = allLines[li];
@@ -448,17 +479,17 @@ function drawTypewriter(rect, chars, showCursor) {
     if (lineChars > 0) {
       const sub = lineText.substring(0, lineChars);
       ctx.fillStyle = C.dark;
-      ctx.font = `600 ${fontSize}px Inter`;
+      ctx.font = `700 ${fontSize}px Inter`;
       ctx.textBaseline = 'middle';
       ctx.fillText(sub, x, y);
 
       // Cursor after last drawn character
       if (showCursor && totalDrawn >= chars && lineChars <= lineText.length) {
-        const cursorX = x + ctx.measureText(sub).width + 2;
+        const cursorX = x + ctx.measureText(sub).width + 3;
         const blinkOn = Math.floor(now / 400) % 2 === 0;
         if (blinkOn) {
           ctx.fillStyle = C.orange;
-          ctx.fillRect(cursorX, y - fontSize * 0.4, 2, fontSize * 0.8);
+          ctx.fillRect(cursorX, y - fontSize * 0.4, 3, fontSize * 0.8);
         }
       }
     }
@@ -477,9 +508,9 @@ function drawEmbeddingContent(rect, progress) {
   ctx.clip();
 
   const innerX = rect.x + s(12);
-  const innerY = rect.y + s(69);
+  const innerY = rect.y + s(110);
   const innerW = rect.w - s(24);
-  const innerH = rect.h - s(84);
+  const innerH = rect.h - s(124);
 
   if (progress < 0.3) {
     // Show question text (smaller)
@@ -631,11 +662,11 @@ function drawSearchContent(rect, progress) {
 
     if (d.labelAlpha > 0.01) {
       ctx.globalAlpha = d.labelAlpha;
-      const lf = s(8);
-      ctx.font = `${d.lit && LIT_ORDER.indexOf(i) < 3 ? '700' : '400'} ${lf}px Inter`;
+      const lf = s(12);
+      ctx.font = `${d.lit && LIT_ORDER.indexOf(i) < 3 ? '800' : '600'} ${lf}px Inter`;
       ctx.fillStyle = C.dark;
       ctx.textAlign = 'center';
-      ctx.fillText(d.name, d.x, d.y - s(r / 2) - s(4));
+      ctx.fillText(d.name, d.x, d.y - s(r / 2) - s(6));
       ctx.textAlign = 'left';
       ctx.globalAlpha = 1;
     }
@@ -695,27 +726,27 @@ function drawSearchContent(rect, progress) {
   if (progress > 0.7) {
     const bAlpha = easeOutCubic(clamp01((progress - 0.7) / 0.2));
     ctx.globalAlpha = bAlpha;
-    const panelW = rect.w * 0.42;
-    const panelH = s(42);
-    const panelX = rect.x + rect.w - panelW - s(8);
+    const panelW = rect.w * 0.78;
+    const panelH = s(56);
+    const panelX = rect.x + (rect.w - panelW) / 2;
     const panelY = rect.y + rect.h - panelH - s(10);
 
-    roundRect(panelX, panelY, panelW, panelH, s(6));
+    roundRect(panelX, panelY, panelW, panelH, s(8));
     ctx.fillStyle = C.white;
     ctx.fill();
     ctx.strokeStyle = C.blue;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2;
     ctx.stroke();
 
-    const tf = s(9);
-    ctx.font = `700 ${tf}px Inter`;
+    const tf = s(13);
+    ctx.font = `800 ${tf}px Inter`;
     ctx.fillStyle = C.blue;
     ctx.textAlign = 'left';
-    ctx.fillText('BM25 keywords:', panelX + s(6), panelY + s(16));
+    ctx.fillText('BM25 keywords', panelX + s(10), panelY + s(20));
 
-    ctx.font = `400 ${tf}px Inter`;
+    ctx.font = `600 ${tf}px Inter`;
     ctx.fillStyle = C.dark;
-    ctx.fillText('schiacce \u2713  focaccia \u2717', panelX + s(6), panelY + s(30));
+    ctx.fillText('schiacce \u2713   focaccia \u2717', panelX + s(10), panelY + s(40));
 
     ctx.globalAlpha = 1;
   }
@@ -741,8 +772,8 @@ const RERANK_FINAL = [
 
 function initRerankItems() {
   const rect = stageRects[3];
-  const startY = rect.y + s(70);
-  const itemH = s(26);
+  const startY = rect.y + s(110);
+  const itemH = s(34);
   const gap = s(6);
   rerankItems = RERANK_INITIAL.map((item, i) => ({
     name: item.name,
@@ -762,22 +793,24 @@ function drawRerankContent(rect, progress) {
   ctx.rect(rect.x + 2, rect.y + 2, rect.w - 4, rect.h - 4);
   ctx.clip();
 
-  const itemH = s(26);
+  const itemH = s(34);
   const gap = s(6);
-  const startY = rect.y + s(70);
+  const startY = rect.y + s(110);
   const itemW = rect.w - s(20);
   const itemX = rect.x + s(10);
 
-  // Cohere label
+  // "via Cohere" label between stage header and items list
   if (progress > 0.05) {
     const la = clamp01((progress - 0.05) / 0.15);
     ctx.globalAlpha = la;
-    const lf = s(10);
+    const lf = s(12);
     ctx.font = `700 ${lf}px Inter`;
-    ctx.fillStyle = C.green;
+    ctx.fillStyle = '#15803D';
     ctx.textAlign = 'center';
-    ctx.fillText('Cohere Rerank', rect.x + rect.w / 2, rect.y + s(58));
+    ctx.textBaseline = 'top';
+    ctx.fillText('via Cohere', rect.x + rect.w / 2, rect.y + s(86));
     ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
     ctx.globalAlpha = 1;
   }
 
@@ -823,23 +856,24 @@ function drawRerankContent(rect, progress) {
     ctx.stroke();
 
     // Name
-    const nf = s(10);
-    ctx.font = `600 ${nf}px Inter`;
+    const nf = s(13);
+    ctx.font = `700 ${nf}px Inter`;
     ctx.fillStyle = C.dark;
     ctx.textBaseline = 'middle';
-    ctx.fillText(item.name, itemX + s(8), y + itemH / 2);
+    const nameMaxW = itemW - s(72);
+    ctx.fillText(item.name, itemX + s(10), y + itemH / 2, nameMaxW);
 
     // Score badge
     const scoreText = score.toFixed(2);
-    const badgeW = s(36);
-    const badgeH = s(18);
-    const badgeX = itemX + itemW - badgeW - s(6);
+    const badgeW = s(48);
+    const badgeH = s(24);
+    const badgeX = itemX + itemW - badgeW - s(8);
     const badgeY = y + (itemH - badgeH) / 2;
-    roundRect(badgeX, badgeY, badgeW, badgeH, s(4));
-    ctx.fillStyle = hexToRgba(C.green, 0.12);
+    roundRect(badgeX, badgeY, badgeW, badgeH, s(5));
+    ctx.fillStyle = hexToRgba(C.green, 0.18);
     ctx.fill();
-    ctx.font = `700 ${s(9)}px Inter`;
-    ctx.fillStyle = C.green;
+    ctx.font = `800 ${s(13)}px Inter`;
+    ctx.fillStyle = '#15803D';
     ctx.textAlign = 'center';
     ctx.fillText(scoreText, badgeX + badgeW / 2, badgeY + badgeH / 2);
     ctx.textAlign = 'left';
@@ -856,115 +890,104 @@ function drawPromptContent(rect, progress) {
   ctx.rect(rect.x + 2, rect.y + 2, rect.w - 4, rect.h - 4);
   ctx.clip();
 
-  const innerX = rect.x + s(8);
-  const innerW = rect.w - s(16);
-  const topY = rect.y + s(58);
+  const innerX = rect.x + s(10);
+  const innerW = rect.w - s(20);
+  const topY = rect.y + s(108);
 
   // Contesto box
-  const ctxBoxH = s(70);
+  const ctxBoxH = s(86);
   const ctxAlpha = easeOutCubic(clamp01(progress / 0.3));
   if (ctxAlpha > 0.01) {
     ctx.globalAlpha = ctxAlpha;
-    roundRect(innerX, topY, innerW, ctxBoxH, s(5));
-    ctx.fillStyle = hexToRgba(C.blue, 0.05);
+    roundRect(innerX, topY, innerW, ctxBoxH, s(7));
+    ctx.fillStyle = hexToRgba(C.blue, 0.08);
     ctx.fill();
     ctx.strokeStyle = C.blue;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 2;
     ctx.stroke();
 
-    const lf = s(9);
-    ctx.font = `700 ${lf}px Inter`;
+    const lf = s(12);
+    ctx.font = `800 ${lf}px Inter`;
     ctx.fillStyle = C.blue;
-    ctx.fillText('CONTESTO', innerX + s(6), topY + s(14));
+    ctx.fillText('CONTESTO', innerX + s(8), topY + s(18));
 
-    ctx.font = `400 ${s(8)}px Inter`;
-    ctx.fillStyle = C.gray;
-    const snippets = ['Le migliori schiacce...', 'Il Montino dal 1927...', 'Dove mangiare a Pisa...'];
+    ctx.font = `600 ${s(11)}px Inter`;
+    ctx.fillStyle = '#374151';
+    const maxSnipW = innerW - s(16);
+    const snippets = ['Le migliori schiacce', 'Il Montino dal 1927', 'Dove mangiare'];
     for (let i = 0; i < snippets.length; i++) {
-      ctx.fillText(snippets[i], innerX + s(6), topY + s(28) + i * s(14));
+      ctx.fillText(snippets[i], innerX + s(8), topY + s(36) + i * s(18), maxSnipW);
     }
     ctx.globalAlpha = 1;
   }
 
   // Plus sign
-  const plusY = topY + ctxBoxH + s(4);
+  const plusY = topY + ctxBoxH + s(2);
   const plusAlpha = easeOutCubic(clamp01((progress - 0.25) / 0.15));
   if (plusAlpha > 0.01) {
     ctx.globalAlpha = plusAlpha;
-    ctx.font = `700 ${s(16)}px Inter`;
-    ctx.fillStyle = C.gray;
+    ctx.font = `800 ${s(20)}px Inter`;
+    ctx.fillStyle = '#4B5563';
     ctx.textAlign = 'center';
-    ctx.fillText('+', rect.x + rect.w / 2, plusY + s(10));
+    ctx.fillText('+', rect.x + rect.w / 2, plusY + s(12));
     ctx.textAlign = 'left';
     ctx.globalAlpha = 1;
   }
 
   // Domanda box
-  const qBoxY = plusY + s(18);
-  const qBoxH = s(36);
+  const qBoxY = plusY + s(22);
+  const qBoxH = s(50);
   const qAlpha = easeOutCubic(clamp01((progress - 0.35) / 0.25));
   if (qAlpha > 0.01) {
     ctx.globalAlpha = qAlpha;
-    roundRect(innerX, qBoxY, innerW, qBoxH, s(5));
-    ctx.fillStyle = hexToRgba(C.orange, 0.05);
+    roundRect(innerX, qBoxY, innerW, qBoxH, s(7));
+    ctx.fillStyle = hexToRgba(C.orange, 0.08);
     ctx.fill();
     ctx.strokeStyle = C.orange;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 2;
     ctx.stroke();
 
-    ctx.font = `700 ${s(9)}px Inter`;
+    ctx.font = `800 ${s(12)}px Inter`;
     ctx.fillStyle = C.orange;
-    ctx.fillText('DOMANDA', innerX + s(6), qBoxY + s(14));
+    ctx.fillText('DOMANDA', innerX + s(8), qBoxY + s(18));
 
-    ctx.font = `400 ${s(8)}px Inter`;
+    ctx.font = `600 ${s(11)}px Inter`;
     ctx.fillStyle = C.dark;
-    ctx.fillText('Dove mangio una buona...', innerX + s(6), qBoxY + s(26));
+    ctx.fillText('Dove mangio una buona…', innerX + s(8), qBoxY + s(38), innerW - s(16));
     ctx.globalAlpha = 1;
   }
 
   // Equals sign
-  const eqY = qBoxY + qBoxH + s(4);
+  const eqY = qBoxY + qBoxH + s(2);
   const eqAlpha = easeOutCubic(clamp01((progress - 0.55) / 0.15));
   if (eqAlpha > 0.01) {
     ctx.globalAlpha = eqAlpha;
-    ctx.font = `700 ${s(16)}px Inter`;
-    ctx.fillStyle = C.gray;
+    ctx.font = `800 ${s(20)}px Inter`;
+    ctx.fillStyle = '#4B5563';
     ctx.textAlign = 'center';
-    ctx.fillText('=', rect.x + rect.w / 2, eqY + s(10));
+    ctx.fillText('=', rect.x + rect.w / 2, eqY + s(12));
     ctx.textAlign = 'left';
     ctx.globalAlpha = 1;
   }
 
   // Prompt encompassing box
-  const promptY = eqY + s(18);
-  const promptH = s(32);
+  const promptY = eqY + s(22);
+  const promptH = s(44);
   const pAlpha = easeOutCubic(clamp01((progress - 0.65) / 0.2));
   if (pAlpha > 0.01) {
     ctx.globalAlpha = pAlpha;
-    roundRect(innerX, promptY, innerW, promptH, s(5));
-    ctx.fillStyle = hexToRgba(C.green, 0.05);
+    roundRect(innerX, promptY, innerW, promptH, s(7));
+    ctx.fillStyle = hexToRgba(C.green, 0.1);
     ctx.fill();
     ctx.strokeStyle = C.green;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2.5;
     ctx.stroke();
 
-    ctx.font = `700 ${s(10)}px Inter`;
-    ctx.fillStyle = C.green;
+    ctx.font = `800 ${s(13)}px Inter`;
+    ctx.fillStyle = '#15803D';
     ctx.textAlign = 'center';
-    ctx.fillText('PROMPT COMPLETO', rect.x + rect.w / 2, promptY + s(19));
+    ctx.fillText('PROMPT COMPLETO', rect.x + rect.w / 2, promptY + s(26), innerW - s(8));
     ctx.textAlign = 'left';
-    ctx.globalAlpha = 1;
-  }
-
-  // System note
-  const noteAlpha = easeOutCubic(clamp01((progress - 0.8) / 0.2));
-  if (noteAlpha > 0.01) {
-    ctx.globalAlpha = noteAlpha;
-    ctx.font = `italic 400 ${s(8)}px Inter`;
-    ctx.fillStyle = C.lightGray;
-    const noteY = promptY + promptH + s(12);
-    ctx.fillText('Sistema: Sei una guida', innerX + s(4), noteY);
-    ctx.fillText('turistica di Pisa...', innerX + s(4), noteY + s(11));
     ctx.globalAlpha = 1;
   }
   ctx.restore();
@@ -972,12 +995,12 @@ function drawPromptContent(rect, progress) {
 
 // ── Step 6: Response ──
 const RESPONSE_LINES = [
-  { text: 'A Pisa la chiamiamo schiacciata!', font: '700', size: 14, color: C.dark },
-  { text: '\uD83C\uDFC6 Il Montino \u2014 schiacciata + cecina da 60 anni', font: '400', size: 12, color: C.dark },
-  { text: '\uD83E\uDD48 Forno Porta a Lucca', font: '400', size: 12, color: C.dark },
-  { text: '\uD83E\uDD49 I Porci Comodi', font: '400', size: 12, color: C.dark },
-  { text: '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500', font: '400', size: 9, color: C.beige },
-  { text: '\uD83D\uDCD6 Fonti: Le migliori schiacce, Il Montino', font: '400', size: 11, color: C.gray }
+  { text: 'Si chiama schiacciata!', font: '800', size: 14, color: C.dark },
+  { text: '\uD83C\uDFC6 Il Montino', font: '700', size: 13, color: C.dark },
+  { text: '\uD83E\uDD48 Porta a Lucca', font: '600', size: 12, color: C.dark },
+  { text: '\uD83E\uDD49 I Porci Comodi', font: '600', size: 12, color: C.dark },
+  { text: '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500', font: '400', size: 10, color: '#B8A788' },
+  { text: '\uD83D\uDCD6 Schiacce, Montino', font: '600', size: 11, color: '#4B5563' }
 ];
 
 function drawThinkingDots(rect) {
@@ -994,9 +1017,9 @@ function drawThinkingDots(rect) {
 }
 
 function drawResponseTypewriter(rect, lineIdx, charInLine) {
-  const innerX = rect.x + s(10);
-  const maxTextW = rect.w - s(20);
-  const startY = rect.y + s(69);
+  const innerX = rect.x + s(12);
+  const maxTextW = rect.w - s(24);
+  const startY = rect.y + s(108);
   let y = startY;
 
   ctx.save();
@@ -1007,14 +1030,14 @@ function drawResponseTypewriter(rect, lineIdx, charInLine) {
   for (let li = 0; li <= lineIdx && li < RESPONSE_LINES.length; li++) {
     const line = RESPONSE_LINES[li];
     const fontSize = s(line.size);
-    const lineH = fontSize * 1.8;
+    const lineH = fontSize * 1.7;
     ctx.font = `${line.font} ${fontSize}px Inter`;
     ctx.fillStyle = line.color;
     ctx.textBaseline = 'middle';
 
     const maxChars = li < lineIdx ? line.text.length : charInLine;
     const text = line.text.substring(0, maxChars);
-    ctx.fillText(text, innerX, y);
+    ctx.fillText(text, innerX, y, maxTextW);
 
     // Cursor on current line
     if (li === lineIdx && charInLine < line.text.length) {
@@ -1037,29 +1060,29 @@ function drawFinalBanner(alpha) {
   if (alpha < 0.01) return;
   ctx.globalAlpha = alpha;
 
-  const bannerW = s(400);
-  const bannerH = s(40);
+  const bannerW = s(620);
+  const bannerH = s(56);
   const bx = (W - bannerW) / 2;
-  const by = stageRects[0].y + stageRects[0].h + s(30);
+  const by = stageRects[0].y + stageRects[0].h + s(36);
 
   // Shadow
   ctx.save();
-  ctx.shadowColor = hexToRgba(C.dark, 0.08);
-  ctx.shadowBlur = s(8);
-  ctx.shadowOffsetY = s(2);
-  roundRect(bx, by, bannerW, bannerH, s(8));
+  ctx.shadowColor = hexToRgba(C.dark, 0.12);
+  ctx.shadowBlur = s(12);
+  ctx.shadowOffsetY = s(3);
+  roundRect(bx, by, bannerW, bannerH, s(10));
   ctx.fillStyle = C.white;
   ctx.fill();
   ctx.restore();
 
   // Green left border
   ctx.fillStyle = C.green;
-  roundRect(bx, by, 4, bannerH, s(2));
+  roundRect(bx, by, 6, bannerH, s(3));
   ctx.fill();
 
   // Text
-  const tf = s(13);
-  ctx.font = `700 ${tf}px Inter`;
+  const tf = s(18);
+  ctx.font = `800 ${tf}px Inter`;
   ctx.fillStyle = C.dark;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -1141,6 +1164,8 @@ function startStep(step) {
   // Update UI
   document.getElementById('step-num').textContent = `Passo ${step} di 7`;
   document.getElementById('step-title').textContent = STEP_TITLES[step];
+  const live = document.getElementById('liveStatus');
+  if (live) live.textContent = `Passo ${step} di 7: ${STEP_TITLES[step]}`;
 
   // Reset step-specific state
   if (step === 1) {
