@@ -2,7 +2,7 @@
 
 Materiale tecnico del talk **"Far parlare i tuoi contenuti: introduzione pratica alla RAG con WordPress"** — WordCamp Torino, 9 maggio 2026.
 
-> Speaker: [Luca Baroncini](https://lucabaroncini.com) — PM @ [Net7](https://netseven.it), lead organizer WordCamp Pisa 2026.
+> Speaker: [Luca Baroncini](https://lucabaroncini.tech), Chief AI Officer @ [Net7](https://www.netseven.it), lead organizer WordCamp Pisa 2026.
 
 ## Cosa c'è in questa repo
 
